@@ -1,0 +1,68 @@
+# Builds the Open Design Electron .deb (upstream tag + Linux packaging PR #8589
+# + opencode 2.x fix #8773) and publishes it as a GitHub release asset.
+# Put this repo's files as:
+#   .github/workflows/build-deb.yml
+#   patches/open-design-linux-packaging.patch
+#   patches/opencode-permissions.ts
+name: build-deb
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "open-design version (upstream tag open-design-v<version>)"
+        default: "0.25.0"
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ci
+
+      - uses: actions/checkout@v4
+        with:
+          repository: nexu-io/open-design
+          ref: open-design-v${{ inputs.version }}
+          path: src
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: npm install -g pnpm@10.33.2
+
+      - name: Apply patches
+        working-directory: src
+        run: |
+          patch -p1 < ../ci/patches/open-design-linux-packaging.patch
+          cp ../ci/patches/opencode-permissions.ts apps/daemon/src/runtimes/opencode-permissions.ts
+
+      - name: Build deb
+        working-directory: src
+        env:
+          CI: "true"
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm bootstrap
+          pnpm tools-pack linux build --to deb --portable
+
+      - name: Publish release asset
+        working-directory: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deb=$(find .tmp -name 'open-design_*_amd64.deb' | head -n1)
+          test -f "$deb"
+          sha256sum "$deb"
+          tag="v${{ inputs.version }}"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+                 --title "open-design ${{ inputs.version }} (deb)" \
+                 --notes "Upstream ${{ inputs.version }} + linux packaging patch + opencode 2.x fix"
+          gh release upload "$tag" "$deb" --repo "$GITHUB_REPOSITORY" --clobber
