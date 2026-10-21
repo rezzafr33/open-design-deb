@@ -1,68 +1,171 @@
-# Builds the Open Design Electron .deb (upstream tag + Linux packaging PR #8589
-# + opencode 2.x fix #8773) and publishes it as a GitHub release asset.
-# Put this repo's files as:
+# Builds the Open Design Electron .deb from an upstream tag with our patch
+# series (patches/*.patch, applied alphabetically) and publishes it as a
+# "<tag>-linux" release on this repo. Nix then repacks that .deb.
+#
+# Layout of this repo:
 #   .github/workflows/build-deb.yml
-#   patches/open-design-linux-packaging.patch
-#   patches/opencode-permissions.ts
+#   patches/open-design-linux-packaging.patch   (upstream PR #8589)
+#   patches/opencode-8773.patch                 (upstream PR #8773)
+#
+# Structure/conventions adapted from kacperpaczos/OpenDesign-For-GNU-Linux
+# (linux-packages.yml): corepack pnpm, least-privilege jobs, "<tag>-linux"
+# release naming, artifact copy-aside, sha256sums.
+
 name: build-deb
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "open-design version (upstream tag open-design-v<version>)"
-        default: "0.25.0"
+      tag:
+        description: "Upstream tag to package (our patches are cut for 0.25.0)"
+        required: false
+        default: "open-design-v0.25.0"
+        type: string
+      force:
+        description: "Delete and recreate the release if it already exists (hash changes!)"
+        required: false
+        default: false
+        type: boolean
 
+# Read-only by default; only the release job elevates.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-deb
+  cancel-in-progress: false
 
 jobs:
-  deb:
-    runs-on: ubuntu-24.04
+  build:
+    name: Build deb
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: ci
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: nexu-io/open-design
-          ref: open-design-v${{ inputs.version }}
+          ref: ${{ inputs.tag }}
           path: src
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
 
-      - run: npm install -g pnpm@10.33.2
+      # packageManager in package.json pins pnpm 10.33.2; do not install pnpm manually.
+      - name: Enable pnpm via corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: corepack enable
 
-      - name: Apply patches
+      - name: Apply patch series
         working-directory: src
         run: |
-          patch -p1 < ../ci/patches/open-design-linux-packaging.patch
-          cp ../ci/patches/opencode-permissions.ts apps/daemon/src/runtimes/opencode-permissions.ts
+          set -euo pipefail
+          shopt -s nullglob
+          patches=(../ci/patches/*.patch)
+          if [ "${#patches[@]}" -eq 0 ]; then
+            echo "::error::No patches found in patches/"
+            exit 1
+          fi
+          for p in "${patches[@]}"; do
+            echo "applying $p"
+            if ! patch -p1 < "$p"; then
+              echo "::error::$(basename "$p") does not apply to ${{ inputs.tag }} - upstream changed a patched area. Rebase the patch."
+              exit 1
+            fi
+          done
 
-      - name: Build deb
+      # The root postinstall script runs the workspace bootstrap, so a plain
+      # install is enough (no separate "pnpm bootstrap").
+      - name: Install dependencies
+        working-directory: src
+        run: pnpm install --frozen-lockfile
+
+      # Runners have ~14 GB free; the unpacked app + .deb are a few GB.
+      - name: Disk checkpoint
+        run: df -h .
+
+      - name: Build .deb
         working-directory: src
         env:
-          CI: "true"
           NEXT_TELEMETRY_DISABLED: "1"
         run: |
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm bootstrap
+          set -euo pipefail
+          # --portable: release artifacts must not bake the build machine's
+          # tools-pack runtime roots into the packaged config; without it the
+          # packaged app throws PackagedPathAccessError on any other machine.
           pnpm tools-pack linux build --to deb --portable
+          # electron-builder wipes its output root on every run, so copy the
+          # artifact aside right after the build.
+          mkdir -p output
+          find .tmp -name '*.deb' -exec cp -v {} output/ \;
+          ls -lh output/
 
-      - name: Publish release asset
-        working-directory: src
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-design-deb
+          path: src/output/*.deb
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+      FORCE: ${{ inputs.force }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: open-design-deb
+          path: output
+
+      - name: Create release
         run: |
-          deb=$(find .tmp -name 'open-design_*_amd64.deb' | head -n1)
-          test -f "$deb"
-          sha256sum "$deb"
-          tag="v${{ inputs.version }}"
-          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
-                 --title "open-design ${{ inputs.version }} (deb)" \
-                 --notes "Upstream ${{ inputs.version }} + linux packaging patch + opencode 2.x fix"
-          gh release upload "$tag" "$deb" --repo "$GITHUB_REPOSITORY" --clobber
+          set -euo pipefail
+          REL="${TAG}-linux"
+          if gh release view "$REL" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "$FORCE" = "true" ]; then
+              gh release delete "$REL" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            else
+              echo "::error::Release $REL already exists. Re-run with force=true to replace it (the nix hash will change)."
+              exit 1
+            fi
+          fi
+
+          deb="$(ls output/*.deb | head -n1)"
+          name="$(basename "$deb")"
+          (cd output && sha256sum "$name" > sha256sums.txt)
+          SRI="sha256-$(openssl dgst -sha256 -binary "$deb" | base64 -w0)"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${REL}/${name}"
+
+          {
+            echo "Open Design ${TAG} + Linux packaging patch (#8589) + OpenCode 2.x fix (#8773)."
+            echo
+            echo "Nix (pkgs/opendesign.nix):"
+            echo
+            echo "    url  = \"${URL}\";"
+            echo "    hash = \"${SRI}\";"
+            echo
+            echo "Unsigned community build; verify against sha256sums.txt."
+          } > release-notes.md
+
+          gh release create "$REL" output/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Open Design Linux - ${TAG}" \
+            --notes-file release-notes.md
+
+          {
+            echo "### Nix values"
+            echo
+            echo '```'
+            echo "url  = \"${URL}\";"
+            echo "hash = \"${SRI}\";"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
