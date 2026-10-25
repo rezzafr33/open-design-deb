@@ -19,7 +19,7 @@ on:
       tag:
         description: "Upstream tag to package (our patches are cut for 0.25.0)"
         required: false
-        default: "open-design-v0.25.0"
+        default: "open-design-v0.26.1"
         type: string
       force:
         description: "Delete and recreate the release if it already exists (hash changes!)"
