@@ -1,0 +1,104 @@
+From 6a3de1fa85fbea8a89a29766cb6dcf9e8a054868 Mon Sep 17 00:00:00 2001
+From: Kacper Paczos <kacperpaczos2024@proton.me>
+Date: Tue, 6 Oct 2026 13:14:27 +0200
+Subject: [PATCH 10/14] fix(linux): rpm after-install renames spaced icon for
+ KDE (review fix)
+
+---
+ tools/pack/resources/linux/rpm-after-install.sh | 16 ++++++++++++++++
+ tools/pack/src/linux.ts                         | 12 +++++++++++-
+ tools/pack/src/resources/index.ts               |  4 ++++
+ tools/pack/tests/linux.test.ts                  | 15 ++++++++++++++-
+ 4 files changed, 45 insertions(+), 2 deletions(-)
+ create mode 100755 tools/pack/resources/linux/rpm-after-install.sh
+
+diff --git a/tools/pack/resources/linux/rpm-after-install.sh b/tools/pack/resources/linux/rpm-after-install.sh
+new file mode 100755
+index 000000000..dcb778d17
+--- /dev/null
++++ b/tools/pack/resources/linux/rpm-after-install.sh
+@@ -0,0 +1,16 @@
++#!/bin/sh
++# RPM post-install fixup: KDE cannot resolve icon-theme names containing
++# spaces, and the rpm target names the desktop entry and icon after the
++# display product name ("Open Design"). Rename both to the
++# spec-conventional space-free form so the menu icon renders.
++set -e
++icon_dir=/usr/share/icons/hicolor/1024x1024/apps
++if [ -f "$icon_dir/Open Design.png" ]; then
++  mv -f "$icon_dir/Open Design.png" "$icon_dir/open-design.png"
++fi
++entry="/usr/share/applications/Open Design.desktop"
++if [ -f "$entry" ]; then
++  sed -i 's|^Icon=Open Design$|Icon=open-design|' "$entry"
++fi
++gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
++exit 0
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index 840ea04d2..773e1596d 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -1007,7 +1007,17 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
+             // the default name keeps the display product name — "Open Design"
+             // with a space — which no install glob above can address.
+             artifactName: "open-design_${version}_${arch}.rpm",
+-            fpm: ["--license", "Apache-2.0"],
++            fpm: [
++              "--license",
++              "Apache-2.0",
++              // KDE cannot resolve spaced icon-theme names ("Open Design"),
++              // which is what the rpm desktop entry and icon are named after.
++              // The script renames both to the space-free form post-install;
++              // the deb lane needs nothing equivalent (its identity is
++              // already space-free).
++              "--after-install",
++              linuxResources.rpmAfterInstall,
++            ],
+           },
+         }
+       : {}),
+diff --git a/tools/pack/src/resources/index.ts b/tools/pack/src/resources/index.ts
+index 50a42c939..6426e36a0 100644
+--- a/tools/pack/src/resources/index.ts
++++ b/tools/pack/src/resources/index.ts
+@@ -61,6 +61,10 @@ export const linuxResources = {
+   debianCopyright: join(resourcesRoot, "linux", "debian", "copyright"),
+   debianChangelogTemplate: join(resourcesRoot, "linux", "debian", "changelog.template"),
+   debianLintianOverrides: join(resourcesRoot, "linux", "debian", "lintian-overrides"),
++  // fpm --after-install script for the rpm lane: renames the space-named
++  // icon and repoints the desktop entry (KDE cannot resolve spaced
++  // icon-theme names, so the menu icon never renders without this).
++  rpmAfterInstall: join(resourcesRoot, "linux", "rpm-after-install.sh"),
+   // Linux counterpart of the shared mac/win web-standalone after-pack hook.
+   // Lives under linux/ (not the shared resources root) because the Linux lane
+   // materializes a self-contained standalone tree without the mac/win pruning,
+diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
+index bd3d36d69..a908d5d32 100644
+--- a/tools/pack/tests/linux.test.ts
++++ b/tools/pack/tests/linux.test.ts
+@@ -918,8 +918,21 @@ describe("writeLinuxBuilderConfig", () => {
+         // ./open-design_*.rpm match the real artifact instead of the default
+         // "Open Design ..." product name carrying a space.
+         artifactName: "open-design_${version}_${arch}.rpm",
+-        fpm: ["--license", "Apache-2.0"],
++        fpm: [
++          "--license",
++          "Apache-2.0",
++          // Post-install fixup: the rpm entry/icon keep the spaced product
++          // name, which KDE cannot resolve as an icon-theme name.
++          "--after-install",
++          expect.stringContaining("rpm-after-install.sh"),
++        ],
+       });
++      // The referenced script must ship with the checkout (fpm runs it at
++      // install time on the user's machine, not at build time).
++      const afterInstallScript = builderConfig.rpm.fpm.at(-1) as string;
++      const afterInstallContent = await readFile(afterInstallScript, "utf8");
++      expect(afterInstallContent).toMatch(/^#!/m);
++      expect(afterInstallContent).toContain("open-design.png");
+       // Explicit targets only: --to rpm must not leak the deb block (and
+       // --to all never produces an rpm; resolveLinuxBuilderTargets owns that).
+       expect(builderConfig.deb).toBeUndefined();
+-- 
+2.55.0
+

@@ -1,0 +1,105 @@
+From 5d7d3202d1f7c7d2d1e5985ee969d8320a9464c9 Mon Sep 17 00:00:00 2001
+From: Kacper Paczos <kacperpaczos2024@proton.me>
+Date: Tue, 6 Oct 2026 02:12:07 +0200
+Subject: [PATCH 08/14] fix(linux): portable release builds, rpm artifact name
+ (final review)
+
+- rpm block: artifactName open-design_${version}_${arch}.rpm so the
+  release-notes glob ./open-design_*.rpm matches the real artifact
+  (default name kept the display product name with a space)
+- test: assert the rpm artifactName
+- comment truth: deb/rpm/dir (not deb/dir) skip the AppRun wrapper;
+  t64 alternates count is three (gtk, asound, atspi)
+- flatpak manifest: drop dead zypak-copy build command, contradictory
+  launcher header comment, unused SELF_DIR, decorative ffmpeg fallback
+---
+ packaging/flatpak/io.open-design.desktop.json |  5 ++---
+ tools/pack/src/linux.ts                       | 15 ++++++++++++---
+ tools/pack/tests/linux.test.ts                |  7 ++++++-
+ 3 files changed, 20 insertions(+), 7 deletions(-)
+
+diff --git a/packaging/flatpak/io.open-design.desktop.json b/packaging/flatpak/io.open-design.desktop.json
+index 619584c3f..cfcc4a486 100644
+--- a/packaging/flatpak/io.open-design.desktop.json
++++ b/packaging/flatpak/io.open-design.desktop.json
+@@ -25,10 +25,9 @@
+             "build-commands": [
+                 "mkdir -p /app/open-design /app/bin /app/lib /app/share/applications /app/share/icons/hicolor/512x512/apps",
+                 "cp -aT . /app/open-design",
+-                "if [ -f /app/base-app/bin/zypak-wrapper.sh ]; then cp -a /app/base-app/bin/zypak-* /app/bin/; cp -a /app/base-app/lib/libzypak*.so* /app/lib/; fi; test -f /app/bin/zypak-wrapper.sh || echo \"zypak-wrapper.sh not found in base app; launcher will fall back to ELECTRON_DISABLE_SANDBOX=1\"",
+-                "cat > /app/bin/open-design <<'EOF'\n#!/bin/bash\n# Open Design Flatpak launcher.\n#\n# Electron's built-in chrome-sandbox needs user namespaces, which the\n# Flatpak sandbox does not provide, so the app is started through zypak\n# (shipped by the org.electronjs.Electron2.BaseApp base app; copied to\n# /app/bin and /app/lib at build time). If zypak is unavailable, fall\n# back to disabling the Chromium sandbox entirely.\nSELF_DIR=\"$(dirname \"$(readlink -f \"$0\")\")\"\nAPP=\"/app/open-design/Open Design\"\n# The sidecar daemon and spawned agent CLIs expect a reachable session\n# bus; flatpak scrubs the variable when it is not set explicitly.\nexport DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}\"\n# Electron's chrome-sandbox cannot work inside the Flatpak sandbox, so\n# apps normally route through zypak (shipped by the Electron BaseApp).\n# zypak 26.08 however re-spawns app children inside its own bwrap\n# sandbox with a scrubbed environment; this app's sidecar supervisor\n# then SIGABRTs in zypak-helper while probing the D-Bus portal\n# (DetermineZygoteStrategy). Until that interplay is resolved, disable\n# Chromium's INNER sandbox and rely on the Flatpak sandbox as the outer\n# boundary (documented in packaging/flatpak/README.md).\nexport ELECTRON_DISABLE_SANDBOX=1\nexec \"$APP\" \"$@\"\nEOF\nchmod +x /app/bin/open-design",
++                "cat > /app/bin/open-design <<'EOF'\n#!/bin/bash\n# Open Design Flatpak launcher.\nAPP=\"/app/open-design/Open Design\"\n# The sidecar daemon and spawned agent CLIs expect a reachable session\n# bus; flatpak scrubs the variable when it is not set explicitly.\nexport DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}\"\n# Electron's chrome-sandbox cannot work inside the Flatpak sandbox, so\n# apps normally route through zypak (shipped by the Electron BaseApp).\n# zypak 26.08 however re-spawns app children inside its own bwrap\n# sandbox with a scrubbed environment; this app's sidecar supervisor\n# then SIGABRTs in zypak-helper while probing the D-Bus portal\n# (DetermineZygoteStrategy). Until that interplay is resolved, disable\n# Chromium's INNER sandbox and rely on the Flatpak sandbox as the outer\n# boundary (documented in packaging/flatpak/README.md).\nexport ELECTRON_DISABLE_SANDBOX=1\nexec \"$APP\" \"$@\"\nEOF\nchmod +x /app/bin/open-design",
+                 "cat > /app/share/applications/io.opendesign.desktop.desktop <<'EOF'\n[Desktop Entry]\nType=Application\nName=Open Design\nGenericName=Open Design\nComment=AI-native design agent workspace (community Flatpak build)\nExec=open-design\nIcon=io.opendesign.desktop\nCategories=Development;Utility;\nStartupWMClass=Open Design\nStartupNotify=true\nTerminal=false\nMimeType=x-scheme-handler/od;\nX-Flatpak=io.opendesign.desktop\nEOF",
+-                "gdk-pixbuf-thumbnailer -s 512 icon.png icon-512.png || ffmpeg -y -loglevel error -i icon.png -vf scale=512:512 icon-512.png",
++                "gdk-pixbuf-thumbnailer -s 512 icon.png icon-512.png",
+                 "install -Dm644 icon-512.png /app/share/icons/hicolor/512x512/apps/io.opendesign.desktop.png"
+             ],
+             "sources": [
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index 1b5a0277b..840ea04d2 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -703,8 +703,9 @@ export function resolveLinuxBuilderTargets(to: ToolPackConfig["to"]): string[] {
+ }
+ 
+ // The AppRun wrapper and its extraFiles injection are AppImage-only concerns.
+-// deb/dir builds must not receive them: a .deb installs Electron directly under
+-// /opt and symlinks the executable into /usr/bin, with no FUSE AppRun shim.
++// deb/rpm/dir builds must not receive them: a .deb installs Electron directly
++// under /opt and symlinks the executable into /usr/bin, with no FUSE AppRun
++// shim — and the rpm and dir targets likewise ship the plain unpacked tree.
+ export function linuxBuildsAppImage(to: ToolPackConfig["to"]): boolean {
+   return to === "all" || to === "appimage";
+ }
+@@ -950,9 +951,10 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
+             artifactName: "open-design_${version}_${arch}.deb",
+             // Runtime shared libraries for an Electron 41 app. electron-builder's
+             // defaults already resolve on Debian, but we spell out the intent and
+-            // alternate the two libraries renamed by the time_t 64-bit (t64)
++            // alternate the three libraries renamed by the time_t 64-bit (t64)
+             // transition so resolution never relies solely on compat `Provides:`:
+             //   - libgtk-3-0     -> libgtk-3-0t64     (trixie+/sid)
++            //   - libasound2     -> libasound2t64     (trixie+/sid)
+             //   - libatspi2.0-0  -> libatspi2.0-0t64  (trixie+/sid)
+             // Verified installable on bookworm (native names) and trixie/sid.
+             depends: [
+@@ -998,6 +1000,13 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
+       ? {
+           rpm: {
+             packageName: RPM_PACKAGE_NAME,
++            // Release filename `<pkg>_<version>_<arch>.rpm`, mirroring the deb
++            // block's artifactName style: electron-builder substitutes ${version}
++            // and ${arch} itself (x86_64 for rpm), so the release-notes glob
++            // ./open-design_*.rpm matches the actual file. Without this override
++            // the default name keeps the display product name — "Open Design"
++            // with a space — which no install glob above can address.
++            artifactName: "open-design_${version}_${arch}.rpm",
+             fpm: ["--license", "Apache-2.0"],
+           },
+         }
+diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
+index c6f360c94..bd3d36d69 100644
+--- a/tools/pack/tests/linux.test.ts
++++ b/tools/pack/tests/linux.test.ts
+@@ -907,12 +907,17 @@ describe("writeLinuxBuilderConfig", () => {
+ 
+       const builderConfig = JSON.parse(await readFile(paths.appBuilderConfigPath, "utf8")) as {
+         linux: { target: string[] };
+-        rpm?: { packageName: string; fpm: string[] };
++        rpm?: { packageName: string; artifactName?: string; fpm: string[] };
+         deb?: unknown;
+       };
+       expect(builderConfig.linux.target).toEqual(["rpm"]);
+       expect(builderConfig.rpm).toEqual({
+         packageName: "open-design",
++        // Release-friendly filename (electron-builder substitutes ${version} and
++        // ${arch} — x86_64 for rpm), so release-notes globs like
++        // ./open-design_*.rpm match the real artifact instead of the default
++        // "Open Design ..." product name carrying a space.
++        artifactName: "open-design_${version}_${arch}.rpm",
+         fpm: ["--license", "Apache-2.0"],
+       });
+       // Explicit targets only: --to rpm must not leak the deb block (and
+-- 
+2.55.0
+
