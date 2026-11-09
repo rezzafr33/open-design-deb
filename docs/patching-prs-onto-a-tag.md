@@ -107,8 +107,109 @@ Sanity checks before you apply anything:
 - **Overlap between PRs.** Read the commit messages. A PR may already contain
   another PR's commits (for example "from upstream PR #6010"). Applying both
   duplicates work and conflicts. Pick the superset.
-- **Stacking and order.** If PR B was built on PR A, apply A first. Apply
-  independent PRs in the order that touches the most shared files first.
+- **Stacking and order.** If you apply more than one PR, decide the order
+  deliberately. Section 4.1 shows how to tell which PR comes first.
+
+### 4.1 Deciding the order when you apply more than one PR
+
+"Which PR is older" can mean two different things: which was written earlier,
+and which must be applied first. They are not always the same. Check these in
+order; the first one that gives a clear answer wins.
+
+**a) Does one PR contain or build on the other?** This decides the order.
+
+`git cherry` compares patch contents. Run it with a limit so that it only looks
+at the second PR's own commits, otherwise it also lists every upstream commit
+between the two branch points (hundreds of lines of noise):
+
+```bash
+# B's own commits (since B branched from main) that A does not have
+git cherry -v pr-<A> pr-<B> "$(git merge-base upstream/main pr-<B>)"
+```
+
+`A` is the reference (normally the older PR, the one you apply first), and `B`
+is the one being checked against it (normally the newer one). Lines starting
+with `-` are B's commits that A already has, with identical content; lines
+starting with `+` are B's own. If every line is `-`, B is redundant because A
+already contains it. To ask the opposite question (does B already contain A?),
+swap the two names. Read the result with two caveats:
+
+- **`+` does not prove "unrelated".** `git cherry` only recognises byte-identical
+  patches. A PR that copied another PR's commit and edited it during review
+  (for example a commit labelled "from upstream PR #NNNN") shows up as `+`
+  even though it carries the same change. Also look at the commit subjects.
+- **A short list, not a long one.** If the output has hundreds of lines, the
+  limit argument is missing or the merge-base lookup failed (see below).
+
+Then check for a direct ancestor relationship and for commit messages that
+name another PR:
+
+```bash
+git merge-base --is-ancestor pr-<A> pr-<B> && echo "B is built on top of A"
+git log --oneline --no-merges upstream/main..pr-<B> | grep -i 'upstream PR'
+```
+
+If B names A, or most of A's files are rewritten in B, treat B as a superset
+of A and verify it by content rather than by patch id: compare the files
+both PRs touch, or check that the specific features you need from A exist in
+B's tree (`git grep` on the branch you built). Do not apply both.
+
+If B is stacked on A, apply A first. With the GitHub CLI,
+`gh pr view <B> --repo <owner>/<repo> --json baseRefName,body` shows it
+directly: a stacked PR's base branch is not `main`, and the description usually
+says "depends on #A".
+
+**b) Which PR is older?** Compare the dates of the PR commits. PR numbers are
+only a rough hint, because a lower number can still be updated later.
+
+```bash
+for n in <A> <B>; do
+  echo "== pr-$n"
+  git log --reverse --no-merges --format='%ad %h %s' --date=short \
+    upstream/main..pr-$n | head -3
+done
+```
+
+To see when each branch started, print the commit it branched from:
+
+```bash
+for n in <A> <B>; do
+  base=$(git merge-base upstream/main pr-$n) || continue
+  echo "pr-$n branched from main on: $(git log -1 --format=%ci "$base")"
+done
+```
+
+If this prints nothing for a PR, `git merge-base` found no common ancestor.
+That usually means a shallow clone (run `git fetch --unshallow upstream`) or
+that `upstream/main` is not fetched yet. The commit dates above are enough to
+decide the order, so you can continue without it.
+
+**c) Do they touch the same files?**
+
+```bash
+for n in <A> <B>; do
+  git diff --name-only "$(git merge-base upstream/main pr-$n)" pr-$n \
+    | sort > /tmp/files-$n
+done
+comm -12 /tmp/files-<A> /tmp/files-<B>      # files both PRs change
+```
+
+- **No overlap, or only a file or two.** The PRs are independent, and the order
+  only affects where small conflicts show up.
+- **A large overlap.** Apply the older, larger, more foundational PR first, and
+  the newer, smaller one on top. A small change is easier to adjust to a large
+  one than the reverse.
+- **The same function or block changed in both.** Expect conflicts when you
+  apply the second PR, and resolve them by keeping whichever implementation is
+  the superset of the other (section 6). Example: two PRs that both rewrote a
+  model-discovery function conflicted in the same three files (source file,
+  test, docs); keeping the newer PR's version, which covered everything the
+  older one did, resolved it.
+
+**Rule of thumb.** Stacked PRs: base first. Independent PRs: older and larger
+first, newer and smaller on top. Whatever you choose, remember that the patch
+numbering (`0001`, `0002`, ...) is the order the build applies them in, so the
+order you cherry-pick in is the order you ship.
 
 ---
 
@@ -367,6 +468,8 @@ copy. The `rm` runs first and cannot be undone.
 | Build fails with `Merge conflict marker encountered` | markers were committed (file added before it was resolved) | fix the file, `git commit --amend`, re-export; add the guard step |
 | Duplicate declaration or missing brace after resolving | both sides added blocks at the same place | keep both blocks, check braces, remove duplicates |
 | Patch applies locally but CI fails to build | `git apply` only checks text, not that the code compiles | run typecheck/tests in the clean worktree |
+| Second PR conflicts heavily with the first | both rewrote the same function or file | check overlap with `comm -12` (section 4.1), apply the older and larger PR first, keep the superset implementation |
+| Applied a PR that an earlier PR already contains | stacked or copied commits | `git cherry -v pr-<A> pr-<B> $(git merge-base upstream/main pr-<B>)`, plus a look at commit subjects; apply only the superset (section 4.1) |
 | Old behavior still present after swapping patches | old patch files left in `patches/` | `git rm patches/*.patch` before copying the new series |
 | Hash mismatch in Nix or a release | the artifact was rebuilt | copy the new URL and hash from the job summary |
 
@@ -383,6 +486,12 @@ git fetch upstream pull/<N>/head:pr-<N>; git fetch upstream main
 
 # inspect
 git log --oneline --no-merges upstream/main..pr-<N>
+
+# decide the order (section 4.1)
+git cherry -v pr-<A> pr-<B> "$(git merge-base upstream/main pr-<B>)"   # B's own commits that A lacks
+git log --reverse --no-merges --format='%ad %h %s' --date=short upstream/main..pr-<N> | head -3
+comm -12 <(git diff --name-only $(git merge-base upstream/main pr-<A>) pr-<A> | sort) \
+         <(git diff --name-only $(git merge-base upstream/main pr-<B>) pr-<B> | sort)
 
 # apply onto the tag
 git switch -c topic-on-<TAG> <TAG>
