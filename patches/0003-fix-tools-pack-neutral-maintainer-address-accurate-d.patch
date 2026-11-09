@@ -1,0 +1,124 @@
+From 1d33d4d7b5d5d9f682f3e0b7684dd37a5e2e09a1 Mon Sep 17 00:00:00 2001
+From: Eric Lemesre <eric.lemesre@gmail.com>
+Date: Thu, 23 Jul 2026 16:17:00 +0200
+Subject: [PATCH 3/8] fix(tools-pack): neutral maintainer address + accurate
+ deb comments/docs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Review fixes on the .deb target:
+- Maintainer: replace the personal Gmail with a neutral project role address
+  (contributors@open-design.ai) in linux.ts and the changelog template. Every
+  install shows it via `apt show`, so a community package must not carry a
+  personal address; maintainers can repoint it.
+- Docs: reflect that .deb is now supported instead of "deferred"
+  (tools/pack/README.md Format-choice + Out-of-scope, tools/pack/AGENTS.md scope).
+- Comments: the deb `depends` comment claimed the list was left unset while the
+  code sets it explicitly — corrected. The description comment claimed to avoid
+  description-starts-with-leading-spaces (lintian still flags it) — dropped the
+  unverified claim; description is now a single short line.
+---
+ tools/pack/AGENTS.md                          |  1 +
+ tools/pack/README.md                          |  7 +++--
+ .../resources/linux/debian/changelog.template |  2 +-
+ tools/pack/src/linux.ts                       | 30 +++++++++----------
+ 4 files changed, 20 insertions(+), 20 deletions(-)
+
+diff --git a/tools/pack/AGENTS.md b/tools/pack/AGENTS.md
+index d83057123..585fd1930 100644
+--- a/tools/pack/AGENTS.md
++++ b/tools/pack/AGENTS.md
+@@ -12,6 +12,7 @@ Read `tools/pack/CACHE.md` before changing any build-cache node key, adding a ca
+ - Windows registry observation/cleanup must go through `reg.exe` and stay scoped to entries matching the namespace install/uninstaller paths.
+ - Windows lifecycle logs must expose NSIS automation logs/markers/timings in addition to app runtime logs.
+ - Linux AppImage build/install/start/stop/logs/uninstall/cleanup smoke commands.
++- Linux `.deb` build via `--to deb` (standards-compliant Debian package; build target only, no lifecycle smoke). Packaging assets live under `resources/linux/debian/`.
+ - Linux headless (no-Electron) install/start/stop via `--headless` flag on `install`, `start`, and `stop`.
+ - Linux containerized builds via `electronuserland/builder` Docker image for distro-agnostic glibc compat.
+ - Consuming sidecar/process/path primitives from `@open-design/sidecar-proto`, `@open-design/sidecar`, and `@open-design/platform`.
+diff --git a/tools/pack/README.md b/tools/pack/README.md
+index 8a679fac8..53c14008b 100644
+--- a/tools/pack/README.md
++++ b/tools/pack/README.md
+@@ -170,14 +170,15 @@ Verified smoke coverage in this repository currently includes:
+ 
+ ### Format choice: why AppImage first
+ 
+-Linux desktop apps in this space split across formats: VS Code ships `.deb` + `.rpm` + Snap; Discord ships AppImage + `.deb`; Slack ships `.deb` + `.rpm`; Cursor and Obsidian ship AppImage. We start with AppImage because one artifact can cover the widest glibc-compatible target without distro repositories, store packaging, signing infrastructure, or per-format install scripts, and it integrates cleanly with the namespace-scoped install layout. `.deb` / `.rpm` / Snap / Flatpak can land incrementally when user demand justifies the extra release ownership.
++Linux desktop apps in this space split across formats: VS Code ships `.deb` + `.rpm` + Snap; Discord ships AppImage + `.deb`; Slack ships `.deb` + `.rpm`; Cursor and Obsidian ship AppImage. We started with AppImage because one artifact can cover the widest glibc-compatible target without distro repositories, store packaging, signing infrastructure, or per-format install scripts, and it integrates cleanly with the namespace-scoped install layout. A standards-compliant `.deb` target is now also supported (`--to deb`); `.rpm` / Snap / Flatpak can still land incrementally when user demand justifies the extra release ownership.
+ 
+ ### Out of scope (later phases)
+ 
+ - AppImage signing (`--signed`) — deferred pending a GPG key infrastructure decision and a user-facing verification flow design (no ETA).
+ - AppImage auto-update feed (`latest-linux.yml`) — the linux electron-builder config has no `publish` block wired, so a generated feed would point users at a feed that never updates. Tracked alongside signing.
+-- Additional package formats: `.deb`, `.rpm`, Snap, Flatpak — deferred until there is demand and an owner for per-distro metadata, signing/store/repository plumbing, install/remove hooks, and release validation.
+-- Full Linux AppImage and headless packaged smoke remain outside the main PR gate; run the applicable tools-pack validation manually or through a release lane when Linux packaging changes.
++- `.deb` build is supported via `--to deb` — a standards-compliant Debian package (`Package: open-design`, install under `/opt/OpenDesign`, section `devel`, RFC822 maintainer, `libc6` + t64-aware `depends`, DEP-5 `copyright` and a valid Debian `changelog`; verified with `dpkg-deb`, `lintian`, and a real boot). Publishing it through the release pipeline, package **signing**, and an **APT repository** remain deferred (separate follow-up plus a GPG key + hosting decision).
++- Additional package formats: `.rpm`, Snap, Flatpak — deferred until there is demand and an owner for per-distro metadata, signing/store/repository plumbing, install/remove hooks, and release validation.
++- Full Linux AppImage PR smoke remains release-lane only; PR validation runs the Linux headless packaged smoke because it does not require a display server.
+ 
+ `--to dmg` is manual-install DMG output only. Any builder-generated updater metadata such as `latest-mac.yml` or
+ `.blockmap` files is treated as scratch and cleaned from the builder directory; release-beta generates the authoritative
+diff --git a/tools/pack/resources/linux/debian/changelog.template b/tools/pack/resources/linux/debian/changelog.template
+index 9341367b7..016c74cc4 100644
+--- a/tools/pack/resources/linux/debian/changelog.template
++++ b/tools/pack/resources/linux/debian/changelog.template
+@@ -2,4 +2,4 @@
+ 
+   * Packaged release.
+ 
+- -- Open Design Contributors <eric.lemesre@gmail.com>  @@DATE@@
++ -- Open Design Contributors <contributors@open-design.ai>  @@DATE@@
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index 7d18a0bc6..7f64d4035 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -737,30 +737,28 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+       target,
+       icon: linuxResources.icon,
+       category: "Development",
+-      // A distinct one-line synopsis + a hard-wrapped extended description. Lines
+-      // are kept under 80 chars and free of leading whitespace so lintian does not
+-      // flag extended-description-line-too-long / description-starts-with-leading-spaces;
+-      // a bare product-name description would trip description-is-pkg-name.
++      // Distinct one-line synopsis + a concise single-line description. A bare
++      // product-name description trips lintian's description-is-pkg-name; keeping
++      // the description to one short line (< 80 chars) sidesteps the extended
++      // Description formatting quirks fpm produces for multi-line input.
+       synopsis: "Local-first design agent driven by your installed code CLI",
+-      description: [
+-        "Open Design detects your installed code-agent CLI and runs design",
+-        "skills and design systems, streaming generated artifacts into a",
+-        "sandboxed live preview.",
+-      ].join("\n"),
++      description: "Runs design skills and design systems, previewing artifacts in a sandbox.",
+       // Path-safe product name (OpenDesign) keeps /opt and /usr/bin clean, but the
+       // menu entry should still show the real brand. Override the .desktop Name so
+       // the display stays "Open Design" regardless of the executable/dir name.
+       desktop: { entry: { Name: DEB_DISPLAY_NAME } },
+       // Debian Policy requires an RFC822 `Maintainer: Name <email>`; a bare name
+-      // trips lintian's maintainer-address-malformed. Used for deb (and rpm) via
+-      // electron-builder's shared linux.maintainer.
+-      maintainer: "Open Design Contributors <eric.lemesre@gmail.com>",
++      // trips lintian's maintainer-address-malformed. Community project → a neutral
++      // project role address, never a personal one (it is shown by `apt show` on
++      // every install). Maintainers can point this at their preferred packaging
++      // contact. Used for deb (and rpm) via electron-builder's shared linux.maintainer.
++      maintainer: "Open Design Contributors <contributors@open-design.ai>",
+     },
+     // Debian package metadata. Only consulted when the `deb` target is built.
+-    // Keep the runtime `depends` unset so electron-builder's Electron-version
+-    // aware defaults apply; overriding replaces (not merges) the whole list and
+-    // is the usual source of "installs but won't launch" breakage. The
+-    // artifactName follows the Debian convention `<pkg>_<version>_<arch>.deb`
++    // `deb.depends` is set explicitly below (not left to electron-builder's
++    // defaults): overriding REPLACES — does not merge — the whole list, so it must
++    // carry every runtime dep itself, including libc6 and the t64-aware libraries.
++    // The artifactName follows the Debian convention `<pkg>_<version>_<arch>.deb`
+     // (lowercase, no spaces), unlike the AppImage which keeps the product name.
+     ...(config.to === "deb"
+       ? {
+-- 
+2.55.0
+

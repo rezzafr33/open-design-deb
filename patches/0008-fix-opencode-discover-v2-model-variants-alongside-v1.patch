@@ -1,0 +1,387 @@
+From ed31157cc1df3bdd25159640b65db447ee8ba574 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=88=91=E5=B0=B1=E7=88=B1=E6=91=87=E6=91=86?=
+ <1635874257@qq.com>
+Date: Mon, 2 Nov 2026 16:18:21 +0800
+Subject: [PATCH 8/8] fix(opencode): discover v2 model variants alongside v1
+
+---
+ apps/daemon/src/runtimes/defs/opencode.ts     | 114 +++++++++--
+ apps/daemon/tests/runtimes/agent-args.test.ts |   2 +-
+ .../runtimes/opencode-model-discovery.test.ts | 185 ++++++++++++++++++
+ docs/agent-adapters.md                        |  12 +-
+ 4 files changed, 294 insertions(+), 19 deletions(-)
+ create mode 100644 apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
+
+diff --git a/apps/daemon/src/runtimes/defs/opencode.ts b/apps/daemon/src/runtimes/defs/opencode.ts
+index 7e6fe646b..52eb6032f 100644
+--- a/apps/daemon/src/runtimes/defs/opencode.ts
++++ b/apps/daemon/src/runtimes/defs/opencode.ts
+@@ -1,11 +1,11 @@
+-import { DEFAULT_MODEL_OPTION } from './shared.js';
+ import {
+   OPENCODE_PERMISSION_CAPABILITY,
+   appendOpenCodePermissionBypass,
+   appendOpenCodeWorkspaceDir,
+ } from '../opencode-permissions.js';
+-import { getRememberedLiveModels } from '../models.js';
+-import type { RuntimeAgentDef, RuntimeModelOption } from '../types.js';
++import { execAgentFile } from '../invocation.js';
++import { DEFAULT_MODEL_OPTION, getRememberedLiveModels } from '../models.js';
++import type { RuntimeAgentDef, RuntimeEnv, RuntimeModelOption } from '../types.js';
+ 
+ const OPENCODE_VARIANT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+ const OPENCODE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/:@-]*$/u;
+@@ -96,6 +96,100 @@ export function parseOpenCodeModels(stdout: string): RuntimeModelOption[] | null
+   return models.length > 1 ? models : null;
+ }
+ 
++/** Read OpenCode 2's model API without retaining provider settings or credentials. */
++export function parseOpenCodeApiModels(stdout: string): RuntimeModelOption[] | null {
++  let response: unknown;
++  try {
++    response = JSON.parse(stdout);
++  } catch {
++    return null;
++  }
++  if (!response || typeof response !== 'object' || Array.isArray(response)) return null;
++  const data = (response as Record<string, unknown>)['data'];
++  if (!Array.isArray(data)) return null;
++
++  const models: RuntimeModelOption[] = [DEFAULT_MODEL_OPTION];
++  const seen = new Set<string>();
++  for (const entry of data) {
++    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
++    const row = entry as Record<string, unknown>;
++    if (row['enabled'] === false || typeof row['providerID'] !== 'string' || typeof row['id'] !== 'string') continue;
++    const id = `${row['providerID']}/${row['id']}`;
++    if (!OPENCODE_MODEL_ID.test(id) || seen.has(id)) continue;
++    seen.add(id);
++
++    const variants = Array.isArray(row['variants']) ? row['variants'] : [];
++    const variantIds = [...new Set(variants.flatMap((entry: unknown) => {
++      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
++      const variant = (entry as Record<string, unknown>)['id'];
++      return typeof variant === 'string' && variant !== 'default' && OPENCODE_VARIANT_ID.test(variant)
++        ? [variant]
++        : [];
++    }))];
++    models.push({
++      id,
++      label: id,
++      ...(variantIds.length > 0 ? { reasoningOptions: reasoningOptions(variantIds) } : {}),
++    });
++  }
++  return models.length > 1 ? models : null;
++}
++
++const OPENCODE_LIST_MODELS_TIMEOUT_MS = 15_000;
++const OPENCODE_LIST_MODELS_MAX_BUFFER = 8 * 1024 * 1024;
++
++function rejectsVerboseModelFlag(error: unknown): boolean {
++  const failure = error as { stdout?: unknown; stderr?: unknown } | null;
++  const output = [
++    error instanceof Error ? error.message : String(error),
++    String(failure?.stderr ?? ''),
++    String(failure?.stdout ?? ''),
++  ].join('\n');
++  return /(?:unrecognized flag|unknown option|unknown argument|unknown flag)[^\n]*--verbose/iu.test(output);
++}
++
++/**
++ * Keep the 1.x verbose probe unchanged. A rejected flag selects the 2.x API,
++ * which retains exact variant IDs; unavailable API metadata falls back to the
++ * plain catalog. All attempts share the existing model-discovery time budget.
++ */
++async function fetchOpenCodeModels(
++  resolvedBin: string,
++  env: RuntimeEnv,
++): Promise<RuntimeModelOption[] | null> {
++  const deadline = Date.now() + OPENCODE_LIST_MODELS_TIMEOUT_MS;
++  const read = async (
++    args: string[],
++    parse: (stdout: string) => RuntimeModelOption[] | null,
++  ): Promise<RuntimeModelOption[] | null> => {
++    const timeout = deadline - Date.now();
++    if (timeout <= 0) return null;
++    const { stdout } = await execAgentFile(resolvedBin, args, {
++      env,
++      timeout,
++      maxBuffer: OPENCODE_LIST_MODELS_MAX_BUFFER,
++    });
++    return parse(String(stdout));
++  };
++
++  try {
++    return await read(['models', '--verbose'], parseOpenCodeModels);
++  } catch (error) {
++    if (!rejectsVerboseModelFlag(error)) return null;
++  }
++  try {
++    const models = await read(['api', 'model.list', '--standalone'], parseOpenCodeApiModels);
++    if (models) return models;
++  } catch {
++    // The experimental API may be unavailable while the plain catalog works.
++  }
++  try {
++    return await read(['models', '--standalone'], parseOpenCodeModels);
++  } catch {
++    return null;
++  }
++}
++
+ function supportsOpenCodeVariant(
+   modelId: string | null | undefined,
+   variant: string | null | undefined,
+@@ -112,20 +206,10 @@ export const opencodeAgentDef = {
+     fallbackBins: ['opencode'],
+     versionArgs: ['--version'],
+     ...OPENCODE_PERMISSION_CAPABILITY,
+-    // `opencode models` prints `provider/model` per line. Real-world
+-    // `opencode models` calls can take >8s (network round-trip to the
+-    // provider registry), so the previous 8s budget timed out and fell back
+-    // to the hardcoded `fallbackModels`, hiding the user's actual catalog.
+-    // 15s matches the listModels budget the rest of the agent defs use
+-    // (devin, hermes, kiro, kilo, kimi, trae-cli, vibe, reasonix).
+-    listModels: {
+-      args: ['models', '--verbose'],
+-      parse: parseOpenCodeModels,
+-      timeoutMs: 15_000,
+-    },
++    fetchModels: fetchOpenCodeModels,
+     fallbackModels: OPENCODE_FALLBACK_MODELS,
+     // OpenCode 1.18.x exposes provider/model-specific variants. Detection
+-    // reads the exact live variant keys from `models --verbose`. The fallback
++    // reads exact live variant keys from verbose output or the 2.x API. The fallback
+     // keeps Sol/Terra/Luna model ids usable during a catalog outage but does
+     // not guess their variants. Unknown model/variant pairs omit `--variant`
+     // rather than inventing a provider capability or preventing the base
+diff --git a/apps/daemon/tests/runtimes/agent-args.test.ts b/apps/daemon/tests/runtimes/agent-args.test.ts
+index d05b74f80..9570e8d19 100644
+--- a/apps/daemon/tests/runtimes/agent-args.test.ts
++++ b/apps/daemon/tests/runtimes/agent-args.test.ts
+@@ -83,7 +83,7 @@ test('opencode args pass model-supported variants without changing the default a
+   const baseArgs = opencode.buildArgs(prompt, [], [], {});
+   assert.equal(opencode.promptViaStdin, true);
+   assert.equal(opencode.reasoningOptions, undefined);
+-  assert.deepEqual(opencode.listModels?.args, ['models', '--verbose']);
++  assert.equal(typeof opencode.fetchModels, 'function');
+   assert.equal(opencode.fallbackModels.find(
+     (model) => model.id === 'openai/gpt-5.6-sol',
+   )?.reasoningOptions, undefined);
+diff --git a/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts b/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
+new file mode 100644
+index 000000000..95309a777
+--- /dev/null
++++ b/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
+@@ -0,0 +1,185 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++
++import { opencodeAgentDef, parseOpenCodeApiModels } from '../../src/runtimes/defs/opencode.js';
++
++const execAgentFileMock = vi.hoisted(() => vi.fn());
++vi.mock('../../src/runtimes/invocation.js', () => ({
++  execAgentFile: execAgentFileMock,
++}));
++
++function rejectsVerbose(): Error & { stderr: string; code: number } {
++  return Object.assign(new Error('Command failed: opencode models --verbose'), {
++    stderr: 'Unrecognized flag: --verbose in command opencode models',
++    code: 1,
++  });
++}
++
++function apiResult(data: unknown[]) {
++  return { stdout: JSON.stringify({ location: {}, data }), stderr: '' };
++}
++
++describe('OpenCode model discovery across CLI generations', () => {
++  beforeEach(() => {
++    execAgentFileMock.mockReset();
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(0);
++  });
++
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it('preserves the single verbose probe and exact variant IDs on OpenCode 1.x', async () => {
++    execAgentFileMock.mockResolvedValue({
++      stdout: 'custom/reasoner\n{"variants":{"high":{},"ultra":{}}}\n',
++      stderr: '',
++    });
++    const env = { PATH: '/fixture/bin' };
++    const models = await opencodeAgentDef.fetchModels('/fixture/opencode', env);
++
++    expect(execAgentFileMock).toHaveBeenCalledTimes(1);
++    expect(execAgentFileMock).toHaveBeenCalledWith(
++      '/fixture/opencode', ['models', '--verbose'], {
++        env, timeout: 15_000, maxBuffer: 8 * 1024 * 1024,
++      },
++    );
++    expect(models?.find((model) => model.id === 'custom/reasoner')?.reasoningOptions).toEqual([
++      { id: 'default', label: 'Default' },
++      { id: 'high', label: 'high' },
++      { id: 'ultra', label: 'ultra' },
++    ]);
++  });
++
++  it('reads OpenCode 2 metadata in a private server after --verbose is rejected', async () => {
++    execAgentFileMock.mockRejectedValueOnce(rejectsVerbose()).mockResolvedValueOnce(apiResult([
++      {
++        providerID: 'custom', id: 'vendor/reasoner', modelID: 'upstream-route', enabled: true,
++        variants: [{ id: 'low' }, { id: 'high-fast' }],
++        settings: { apiKey: 'fixture-secret', baseURL: 'https://fixture.invalid/v1' },
++      },
++      { providerID: 'custom', id: 'plain', enabled: true, variants: [] },
++      { providerID: 'custom', id: 'disabled', enabled: false, variants: [{ id: 'high' }] },
++    ]));
++    const models = await opencodeAgentDef.fetchModels('/fixture/opencode', {});
++
++    expect(execAgentFileMock.mock.calls.map((call) => call[1])).toEqual([
++      ['models', '--verbose'], ['api', 'model.list', '--standalone'],
++    ]);
++    expect(models?.map((model) => model.id)).toEqual(['default', 'custom/vendor/reasoner', 'custom/plain']);
++    expect(models?.[1]?.reasoningOptions).toEqual([
++      { id: 'default', label: 'Default' },
++      { id: 'low', label: 'low' },
++      { id: 'high-fast', label: 'high-fast' },
++    ]);
++    expect(models?.[2]?.reasoningOptions).toBeUndefined();
++    expect(JSON.stringify(models)).not.toContain('fixture-secret');
++    expect(JSON.stringify(models)).not.toContain('upstream-route');
++  });
++
++  it.each([
++    { stdout: '{malformed', stderr: '' },
++    { stdout: '{"data":[]}', stderr: '' },
++    { stdout: '{"data":"not-an-array"}', stderr: '' },
++  ])('falls back to a plain private-server catalog when API metadata is unusable: %j', async (result) => {
++    execAgentFileMock.mockRejectedValueOnce(rejectsVerbose())
++      .mockResolvedValueOnce(result)
++      .mockResolvedValueOnce({ stdout: 'custom/reasoner\ncustom/plain\n', stderr: '' });
++    const models = await opencodeAgentDef.fetchModels('/fixture/opencode', {});
++
++    expect(execAgentFileMock.mock.calls.map((call) => call[1])).toEqual([
++      ['models', '--verbose'], ['api', 'model.list', '--standalone'], ['models', '--standalone'],
++    ]);
++    expect(models?.map((model) => model.id)).toEqual(['default', 'custom/reasoner', 'custom/plain']);
++    expect(models?.[1]?.reasoningOptions).toBeUndefined();
++  });
++
++  it('keeps the plain catalog available when the experimental API command fails', async () => {
++    execAgentFileMock.mockRejectedValueOnce(rejectsVerbose())
++      .mockRejectedValueOnce(new Error('Unknown operation: model.list'))
++      .mockResolvedValueOnce({ stdout: 'custom/reasoner\n', stderr: '' });
++
++    await expect(opencodeAgentDef.fetchModels('/fixture/opencode', {})).resolves.toEqual([
++      expect.objectContaining({ id: 'default' }), { id: 'custom/reasoner', label: 'custom/reasoner' },
++    ]);
++  });
++
++  it.each([
++    new Error('spawn ENOENT'),
++    Object.assign(new Error('timed out'), { killed: true, signal: 'SIGKILL' }),
++    new Error('Provider registry unavailable'),
++  ])('does not start extra probes after a verbose probe failure unrelated to --verbose: %s', async (error) => {
++    execAgentFileMock.mockRejectedValueOnce(error);
++
++    await expect(opencodeAgentDef.fetchModels('/fixture/opencode', {})).resolves.toBeNull();
++    expect(execAgentFileMock).toHaveBeenCalledTimes(1);
++  });
++
++  it('shares one time budget across verbose, API and plain probes', async () => {
++    execAgentFileMock.mockImplementationOnce(async () => {
++      vi.setSystemTime(100);
++      throw rejectsVerbose();
++    }).mockImplementationOnce(async () => {
++      vi.setSystemTime(3_100);
++      throw new Error('API unavailable');
++    }).mockResolvedValueOnce({ stdout: 'custom/plain\n', stderr: '' });
++
++    await opencodeAgentDef.fetchModels('/fixture/opencode', {});
++
++    expect(execAgentFileMock.mock.calls.map((call) => call[2].timeout)).toEqual([15_000, 14_900, 11_900]);
++  });
++
++  it('does not pass timeout zero or start a new process after the budget is exhausted', async () => {
++    execAgentFileMock.mockRejectedValueOnce(rejectsVerbose()).mockImplementationOnce(async () => {
++      vi.setSystemTime(15_000);
++      throw new Error('API timed out');
++    });
++
++    await expect(opencodeAgentDef.fetchModels('/fixture/opencode', {})).resolves.toBeNull();
++    expect(execAgentFileMock).toHaveBeenCalledTimes(2);
++  });
++
++  it('returns no catalog when both the API and plain fallback fail', async () => {
++    execAgentFileMock.mockRejectedValueOnce(rejectsVerbose())
++      .mockRejectedValueOnce(new Error('API unavailable'))
++      .mockRejectedValueOnce(new Error('Plain catalog unavailable'));
++
++    await expect(opencodeAgentDef.fetchModels('/fixture/opencode', {})).resolves.toBeNull();
++    expect(execAgentFileMock).toHaveBeenCalledTimes(3);
++  });
++
++  it('does not start the API when the initial probe exhausts the total budget', async () => {
++    execAgentFileMock.mockImplementationOnce(async () => {
++      vi.setSystemTime(15_000);
++      throw rejectsVerbose();
++    });
++
++    await expect(opencodeAgentDef.fetchModels('/fixture/opencode', {})).resolves.toBeNull();
++    expect(execAgentFileMock).toHaveBeenCalledTimes(1);
++  });
++});
++
++describe('OpenCode 2 model metadata parsing', () => {
++  it('validates entries and variants, deduplicates IDs and omits the reserved default variant', () => {
++    const stdout = JSON.stringify({ data: [
++      null, [], 4, 'invalid', { providerID: false, id: 'invalid' },
++      { providerID: 'custom', id: '--invalid' },
++      { providerID: 'custom', id: 'reasoner', variants: [
++        null, 'high', { id: 'default' }, { id: 'high' }, { id: 'high' },
++        { id: '--invalid' }, { id: 'two words' }, { id: 'ultra-fast' },
++      ] },
++      { providerID: 'custom', id: 'reasoner', variants: [{ id: 'unexpected-duplicate' }] },
++    ] });
++
++    expect(parseOpenCodeApiModels(stdout)).toEqual([
++      expect.objectContaining({ id: 'default' }),
++      { id: 'custom/reasoner', label: 'custom/reasoner', reasoningOptions: [
++        { id: 'default', label: 'Default' }, { id: 'high', label: 'high' },
++        { id: 'ultra-fast', label: 'ultra-fast' },
++      ] },
++    ]);
++  });
++
++  it.each(['null', '[]', '{}', 'not JSON', '{"data":[null,{}]}'])('returns no catalog for unusable responses: %s', (stdout) => {
++    expect(parseOpenCodeApiModels(stdout)).toBeNull();
++  });
++});
+diff --git a/docs/agent-adapters.md b/docs/agent-adapters.md
+index 83f59e346..d5f29dac5 100644
+--- a/docs/agent-adapters.md
++++ b/docs/agent-adapters.md
+@@ -289,9 +289,15 @@ authentication, and the boundary between REST and MCP.
+   Newer builds that advertise `--dangerously-skip-permissions` from
+   `opencode run --help` receive that flag; older builds keep the compatible
+   argv without it.
+-- The adapter discovers models with `opencode models`, parses structured JSON
+-  events, and captures OpenCode's `sessionID`. Follow-up turns continue the
+-  native session with `-s <session-id>`.
++- Model discovery keeps the OpenCode 1.x `models --verbose` probe. When the
++  CLI rejects `--verbose`, the adapter reads the OpenCode 2.x
++  `api model.list --standalone` catalog, retaining exact provider/model IDs and
++  reasoning variants. An unavailable API falls back to `models --standalone`
++  without advertising unverified variants. All attempts share a 15-second
++  budget; provider settings and credentials are not returned to the picker.
++- The adapter parses structured JSON events and captures OpenCode's
++  `sessionID`. Follow-up turns continue the native session with
++  `-s <session-id>`.
+ - External MCP configuration is supplied per invocation through
+   `OPENCODE_CONFIG_CONTENT`; selected skills still use the shared §4 path.
+ 
+-- 
+2.55.0
+

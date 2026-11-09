@@ -1,0 +1,65 @@
+From 3ed69e5b7040e02ff6b9826cdfd36aef3a55098f Mon Sep 17 00:00:00 2001
+From: Eric Lemesre <eric.lemesre@gmail.com>
+Date: Fri, 4 Sep 2026 13:38:32 +0200
+Subject: [PATCH 7/8] fix(tools-pack): single-space the extended deb
+ description
+
+electron-builder hands fpm `--description "<synopsis>\n <description>"`
+with the continuation line already indented, and fpm's control template
+indents it again, so lintian reports
+description-starts-with-leading-spaces. Our fpm passthrough runs after
+electron-builder's own arguments and fpm keeps the last --description,
+so pass the raw two-line text there (same override pattern as --name).
+---
+ tools/pack/src/linux.ts | 18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index caf877913..6190a28d3 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -743,6 +743,10 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+   const linuxProductName = isDeb ? DEB_PRODUCT_NAME : PRODUCT_NAME;
+   const linuxExecutableName = isDeb ? DEB_PACKAGE_NAME : PRODUCT_NAME;
+   const debMeta = isDeb ? await writeDebMetadataFiles(paths, packageVersion) : null;
++  // Distinct one-line synopsis + a concise single-line description. A bare
++  // product-name description trips lintian's description-is-pkg-name.
++  const linuxSynopsis = "Local-first design agent driven by your installed code CLI";
++  const linuxDescription = "Runs design skills and design systems, previewing artifacts in a sandbox.";
+ 
+   const builderConfig: Record<string, unknown> = {
+     appId: "io.open-design.desktop",
+@@ -790,12 +794,8 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+       target,
+       icon: linuxResources.icon,
+       category: "Development",
+-      // Distinct one-line synopsis + a concise single-line description. A bare
+-      // product-name description trips lintian's description-is-pkg-name; keeping
+-      // the description to one short line (< 80 chars) sidesteps the extended
+-      // Description formatting quirks fpm produces for multi-line input.
+-      synopsis: "Local-first design agent driven by your installed code CLI",
+-      description: "Runs design skills and design systems, previewing artifacts in a sandbox.",
++      synopsis: linuxSynopsis,
++      description: linuxDescription,
+       // Path-safe product name (OpenDesign) keeps /opt and /usr/bin clean, but the
+       // menu entry should still show the real brand. Override the .desktop Name so
+       // the display stays "Open Design" regardless of the executable/dir name.
+@@ -838,9 +838,15 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+             //                      (electron-builder ships none: lintian no-copyright-file).
+             //   lintian-overrides=... -> documents the assumed bundled-Electron
+             //                      deviations at /usr/share/lintian/overrides/<pkg>.
++            //   --description  -> electron-builder already indents the extended
++            //                      description line, then fpm indents it again
++            //                      (description-starts-with-leading-spaces); passing
++            //                      the raw two-line text here lets fpm indent once.
+             fpm: [
+               "--name",
+               DEB_PACKAGE_NAME,
++              "--description",
++              `${linuxSynopsis}\n${linuxDescription}`,
+               "--license",
+               "Apache-2.0",
+               "--deb-changelog",
+-- 
+2.55.0
+
