@@ -1,37 +1,95 @@
-From ed31157cc1df3bdd25159640b65db447ee8ba574 Mon Sep 17 00:00:00 2001
+From 2ec9d13ff1f8cbb0d01e5d80c4b7b0d7d0e07ad8 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=E6=88=91=E5=B0=B1=E7=88=B1=E6=91=87=E6=91=86?=
  <1635874257@qq.com>
 Date: Mon, 2 Nov 2026 16:18:21 +0800
-Subject: [PATCH 8/8] fix(opencode): discover v2 model variants alongside v1
+Subject: [PATCH 14/14] fix(opencode): discover v2 model variants alongside v1
 
 ---
- apps/daemon/src/runtimes/defs/opencode.ts     | 114 +++++++++--
- apps/daemon/tests/runtimes/agent-args.test.ts |   2 +-
+ apps/daemon/src/runtimes/defs/opencode.ts     | 157 +++++++++------
+ apps/daemon/tests/runtimes/agent-args.test.ts |   3 -
  .../runtimes/opencode-model-discovery.test.ts | 185 ++++++++++++++++++
- docs/agent-adapters.md                        |  12 +-
- 4 files changed, 294 insertions(+), 19 deletions(-)
+ docs/agent-adapters.md                        |  15 +-
+ 4 files changed, 290 insertions(+), 70 deletions(-)
  create mode 100644 apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
 
 diff --git a/apps/daemon/src/runtimes/defs/opencode.ts b/apps/daemon/src/runtimes/defs/opencode.ts
-index 7e6fe646b..52eb6032f 100644
+index 920dfbb20..5fd604e3e 100644
 --- a/apps/daemon/src/runtimes/defs/opencode.ts
 +++ b/apps/daemon/src/runtimes/defs/opencode.ts
-@@ -1,11 +1,11 @@
+@@ -1,4 +1,3 @@
 -import { DEFAULT_MODEL_OPTION } from './shared.js';
  import {
    OPENCODE_PERMISSION_CAPABILITY,
    appendOpenCodePermissionBypass,
-   appendOpenCodeWorkspaceDir,
+@@ -7,66 +6,9 @@ import {
+   openCodeModelArgs,
  } from '../opencode-permissions.js';
+ import { execAgentFile } from '../invocation.js';
 -import { getRememberedLiveModels } from '../models.js';
--import type { RuntimeAgentDef, RuntimeModelOption } from '../types.js';
-+import { execAgentFile } from '../invocation.js';
 +import { DEFAULT_MODEL_OPTION, getRememberedLiveModels } from '../models.js';
-+import type { RuntimeAgentDef, RuntimeEnv, RuntimeModelOption } from '../types.js';
+ import type { RuntimeAgentDef, RuntimeEnv, RuntimeModelOption } from '../types.js';
  
+-const OPENCODE_LIST_MODELS_TIMEOUT_MS = 15_000;
+-// Models lists easily exceed the default 1MB buffer once every OpenRouter
+-// model is included.
+-const OPENCODE_LIST_MODELS_MAX_BUFFER = 8 * 1024 * 1024;
+-
+-// The OpenCode 2.x rejection of a flag the 1.x CLI accepted (and the 1.x
+-// wording, in case an older build ever rejects one).
+-const OPENCODE_UNRECOGNIZED_FLAG = /unrecognized flag|unknown option/iu;
+-
+-function isUnrecognizedFlagError(error: unknown): boolean {
+-  const parts = [
+-    error instanceof Error ? error.message : String(error),
+-    String((error as { stderr?: unknown })?.stderr ?? ''),
+-    String((error as { stdout?: unknown })?.stdout ?? ''),
+-  ];
+-  return OPENCODE_UNRECOGNIZED_FLAG.test(parts.join('\n'));
+-}
+-
+-async function readOpenCodeModels(
+-  resolvedBin: string,
+-  env: RuntimeEnv,
+-  args: string[],
+-): Promise<RuntimeModelOption[] | null> {
+-  const { stdout } = await execAgentFile(resolvedBin, args, {
+-    env,
+-    timeout: OPENCODE_LIST_MODELS_TIMEOUT_MS,
+-    maxBuffer: OPENCODE_LIST_MODELS_MAX_BUFFER,
+-  });
+-  return parseOpenCodeModels(String(stdout));
+-}
+-
+-/**
+- * Discover models across both OpenCode generations. 1.x exposes per-model
+- * variant metadata through `models --verbose`; 2.x removed the flag (the
+- * command exits 1 with "Unrecognized flag") and only prints `provider/model`
+- * per line, which `parseOpenCodeModels` already accepts. Only that rejection
+- * earns a second spawn: a timeout or crash of the verbose listing says
+- * nothing about the plain one and must not double the detection budget.
+- * Real-world listings can take >8s (network round-trip to the provider
+- * registry), hence the 15s budget shared with the other agent defs.
+- */
+-async function fetchOpenCodeModels(
+-  resolvedBin: string,
+-  env: RuntimeEnv,
+-): Promise<RuntimeModelOption[] | null> {
+-  try {
+-    return await readOpenCodeModels(resolvedBin, env, ['models', '--verbose']);
+-  } catch (error) {
+-    if (!isUnrecognizedFlagError(error)) return null;
+-  }
+-  try {
+-    return await readOpenCodeModels(resolvedBin, env, ['models']);
+-  } catch {
+-    return null;
+-  }
+-}
+-
  const OPENCODE_VARIANT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
  const OPENCODE_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/:@-]*$/u;
-@@ -96,6 +96,100 @@ export function parseOpenCodeModels(stdout: string): RuntimeModelOption[] | null
+ 
+@@ -156,6 +98,100 @@ export function parseOpenCodeModels(stdout: string): RuntimeModelOption[] | null
    return models.length > 1 ? models : null;
  }
  
@@ -132,42 +190,30 @@ index 7e6fe646b..52eb6032f 100644
  function supportsOpenCodeVariant(
    modelId: string | null | undefined,
    variant: string | null | undefined,
-@@ -112,20 +206,10 @@ export const opencodeAgentDef = {
-     fallbackBins: ['opencode'],
-     versionArgs: ['--version'],
-     ...OPENCODE_PERMISSION_CAPABILITY,
--    // `opencode models` prints `provider/model` per line. Real-world
--    // `opencode models` calls can take >8s (network round-trip to the
--    // provider registry), so the previous 8s budget timed out and fell back
--    // to the hardcoded `fallbackModels`, hiding the user's actual catalog.
--    // 15s matches the listModels budget the rest of the agent defs use
--    // (devin, hermes, kiro, kilo, kimi, trae-cli, vibe, reasonix).
--    listModels: {
--      args: ['models', '--verbose'],
--      parse: parseOpenCodeModels,
--      timeoutMs: 15_000,
--    },
-+    fetchModels: fetchOpenCodeModels,
+@@ -175,8 +211,7 @@ export const opencodeAgentDef = {
+     fetchModels: fetchOpenCodeModels,
      fallbackModels: OPENCODE_FALLBACK_MODELS,
      // OpenCode 1.18.x exposes provider/model-specific variants. Detection
--    // reads the exact live variant keys from `models --verbose`. The fallback
+-    // reads the exact live variant keys from `models --verbose`; 2.x has no
+-    // CLI listing of variants, so none are advertised there. The fallback
 +    // reads exact live variant keys from verbose output or the 2.x API. The fallback
      // keeps Sol/Terra/Luna model ids usable during a catalog outage but does
-     // not guess their variants. Unknown model/variant pairs omit `--variant`
+     // not guess their variants. Unknown model/variant pairs omit the variant
      // rather than inventing a provider capability or preventing the base
 diff --git a/apps/daemon/tests/runtimes/agent-args.test.ts b/apps/daemon/tests/runtimes/agent-args.test.ts
-index d05b74f80..9570e8d19 100644
+index 6c7256f60..8adb0e270 100644
 --- a/apps/daemon/tests/runtimes/agent-args.test.ts
 +++ b/apps/daemon/tests/runtimes/agent-args.test.ts
-@@ -83,7 +83,7 @@ test('opencode args pass model-supported variants without changing the default a
+@@ -83,9 +83,6 @@ test('opencode args pass model-supported variants without changing the default a
    const baseArgs = opencode.buildArgs(prompt, [], [], {});
    assert.equal(opencode.promptViaStdin, true);
    assert.equal(opencode.reasoningOptions, undefined);
--  assert.deepEqual(opencode.listModels?.args, ['models', '--verbose']);
-+  assert.equal(typeof opencode.fetchModels, 'function');
+-  // Model discovery is version-aware (`models --verbose` on 1.x, plain
+-  // `models` on 2.x), so it lives in `fetchModels` rather than a static argv.
+-  assert.equal(opencode.listModels, undefined);
+   assert.equal(typeof opencode.fetchModels, 'function');
    assert.equal(opencode.fallbackModels.find(
      (model) => model.id === 'openai/gpt-5.6-sol',
-   )?.reasoningOptions, undefined);
 diff --git a/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts b/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
 new file mode 100644
 index 000000000..95309a777
@@ -360,28 +406,31 @@ index 000000000..95309a777
 +  });
 +});
 diff --git a/docs/agent-adapters.md b/docs/agent-adapters.md
-index 83f59e346..d5f29dac5 100644
+index b56a258db..10835e956 100644
 --- a/docs/agent-adapters.md
 +++ b/docs/agent-adapters.md
-@@ -289,9 +289,15 @@ authentication, and the boundary between REST and MCP.
-   Newer builds that advertise `--dangerously-skip-permissions` from
-   `opencode run --help` receive that flag; older builds keep the compatible
-   argv without it.
--- The adapter discovers models with `opencode models`, parses structured JSON
--  events, and captures OpenCode's `sessionID`. Follow-up turns continue the
--  native session with `-s <session-id>`.
+@@ -301,12 +301,15 @@ authentication, and the boundary between REST and MCP.
+     pinned to it for the 2.0.x builds that consult `PWD` first.
+   - An unprobed build keeps the 1.x argv: a 2.x CLI then fails loudly at
+     spawn, whereas a 1.x CLI without `--dir` would lose files silently.
+-- Model discovery tries `opencode models --verbose` (1.x, with per-model
+-  variant metadata) and falls back to plain `opencode models` (2.x, no
+-  variants, so no variant picker). The adapter parses structured JSON events,
+-  which have the same shape on both generations, and captures OpenCode's
+-  `sessionID`. Follow-up turns continue the native session with
+-  `-s <session-id>`.
 +- Model discovery keeps the OpenCode 1.x `models --verbose` probe. When the
 +  CLI rejects `--verbose`, the adapter reads the OpenCode 2.x
 +  `api model.list --standalone` catalog, retaining exact provider/model IDs and
 +  reasoning variants. An unavailable API falls back to `models --standalone`
 +  without advertising unverified variants. All attempts share a 15-second
 +  budget; provider settings and credentials are not returned to the picker.
-+- The adapter parses structured JSON events and captures OpenCode's
-+  `sessionID`. Follow-up turns continue the native session with
-+  `-s <session-id>`.
- - External MCP configuration is supplied per invocation through
-   `OPENCODE_CONFIG_CONTENT`; selected skills still use the shared §4 path.
- 
++- The adapter parses structured JSON events, which have the same shape on
++  both generations, and captures OpenCode's `sessionID`. Follow-up turns
++  continue the native session with `-s <session-id>`.
+ - Child-session evidence reads `opencode export <id> --sanitize --pure` on
+   1.x and `opencode session export <id> --sanitize --standalone` on 2.x.
+ - The optional tool-preview plugin (`runtimes/opencode-event-plugin.ts`) is
 -- 
 2.55.0
 

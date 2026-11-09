@@ -1,0 +1,31 @@
+From dc748a75e9ad079d3d244855fb21a99e4f48e983 Mon Sep 17 00:00:00 2001
+From: Kacper Paczos <kacperpaczos2024@proton.me>
+Date: Mon, 5 Oct 2026 21:08:29 +0200
+Subject: [PATCH 03/14] =?UTF-8?q?pack(linux):=20deb=20depends=20=E2=80=94?=
+ =?UTF-8?q?=20add=20libgbm1=20and=20libasound2=20(review=20fix)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ tools/pack/src/linux.ts | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index cc7523810..121f52a32 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -846,6 +846,10 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+               // so declare it explicitly (lintian: missing-dependency-on-libc).
+               "libc6",
+               "libgtk-3-0 | libgtk-3-0t64",
++              // Chromium links these directly (Ozone GPU + ALSA audio); the
++              // electron-builder baseline omits them like it omits libc6.
++              "libgbm1",
++              "libasound2 | libasound2t64",
+               "libnotify4",
+               "libnss3",
+               "libxss1",
+-- 
+2.55.0
+

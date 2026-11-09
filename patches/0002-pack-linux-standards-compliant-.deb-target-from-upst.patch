@@ -1,0 +1,695 @@
+From 78a1986b781a21235ab2e24adb13882972d5af94 Mon Sep 17 00:00:00 2001
+From: Kacper Paczos <kacperpaczos2024@proton.me>
+Date: Mon, 5 Oct 2026 20:53:34 +0200
+Subject: [PATCH 02/14] pack(linux): standards-compliant .deb target (from
+ upstream PR #6010)
+
+Note: container-build hunks from the PR were rejected; host builds only (see task report).
+---
+ tools/pack/AGENTS.md                          |   1 +
+ tools/pack/README.md                          |  12 +-
+ .../resources/linux/debian/changelog.template |   5 +
+ tools/pack/resources/linux/debian/copyright   |  17 ++
+ .../resources/linux/debian/lintian-overrides  |  54 ++++
+ tools/pack/src/config/index.ts                |   4 +-
+ tools/pack/src/index.ts                       |   2 +-
+ tools/pack/src/linux.ts                       | 263 ++++++++++++++++--
+ tools/pack/src/resources/index.ts             |   6 +
+ tools/pack/tests/linux.test.ts                |  93 +++++++
+ 10 files changed, 432 insertions(+), 25 deletions(-)
+ create mode 100644 tools/pack/resources/linux/debian/changelog.template
+ create mode 100644 tools/pack/resources/linux/debian/copyright
+ create mode 100644 tools/pack/resources/linux/debian/lintian-overrides
+
+diff --git a/tools/pack/AGENTS.md b/tools/pack/AGENTS.md
+index d83057123..585fd1930 100644
+--- a/tools/pack/AGENTS.md
++++ b/tools/pack/AGENTS.md
+@@ -12,6 +12,7 @@ Read `tools/pack/CACHE.md` before changing any build-cache node key, adding a ca
+ - Windows registry observation/cleanup must go through `reg.exe` and stay scoped to entries matching the namespace install/uninstaller paths.
+ - Windows lifecycle logs must expose NSIS automation logs/markers/timings in addition to app runtime logs.
+ - Linux AppImage build/install/start/stop/logs/uninstall/cleanup smoke commands.
++- Linux `.deb` build via `--to deb` (standards-compliant Debian package; build target only, no lifecycle smoke). Packaging assets live under `resources/linux/debian/`.
+ - Linux headless (no-Electron) install/start/stop via `--headless` flag on `install`, `start`, and `stop`.
+ - Linux containerized builds via `electronuserland/builder` Docker image for distro-agnostic glibc compat.
+ - Consuming sidecar/process/path primitives from `@open-design/sidecar-proto`, `@open-design/sidecar`, and `@open-design/platform`.
+diff --git a/tools/pack/README.md b/tools/pack/README.md
+index 8a679fac8..21829bea4 100644
+--- a/tools/pack/README.md
++++ b/tools/pack/README.md
+@@ -96,6 +96,7 @@ Local lifecycle commands:
+ 
+ - `tools-pack linux build --to all` (default; produces AppImage)
+ - `tools-pack linux build --to appimage` (explicit AppImage)
++- `tools-pack linux build --to deb` (standards-compliant Debian package; build target only — no install/start/stop lifecycle smoke)
+ - `tools-pack linux build --to dir` (unpacked output for fast iteration)
+ - `tools-pack linux build --containerized` (run electron-builder inside `electronuserland/builder:base` Docker for a wider glibc compatibility target — requires Docker)
+ - `tools-pack linux build --to all --portable` (release artifacts that must not bake local tools-pack runtime paths)
+@@ -170,14 +171,19 @@ Verified smoke coverage in this repository currently includes:
+ 
+ ### Format choice: why AppImage first
+ 
+-Linux desktop apps in this space split across formats: VS Code ships `.deb` + `.rpm` + Snap; Discord ships AppImage + `.deb`; Slack ships `.deb` + `.rpm`; Cursor and Obsidian ship AppImage. We start with AppImage because one artifact can cover the widest glibc-compatible target without distro repositories, store packaging, signing infrastructure, or per-format install scripts, and it integrates cleanly with the namespace-scoped install layout. `.deb` / `.rpm` / Snap / Flatpak can land incrementally when user demand justifies the extra release ownership.
++Linux desktop apps in this space split across formats: VS Code ships `.deb` + `.rpm` + Snap; Discord ships AppImage + `.deb`; Slack ships `.deb` + `.rpm`; Cursor and Obsidian ship AppImage. We started with AppImage because one artifact can cover the widest glibc-compatible target without distro repositories, store packaging, signing infrastructure, or per-format install scripts, and it integrates cleanly with the namespace-scoped install layout. A standards-compliant `.deb` target is now also supported (`--to deb`); `.rpm` / Snap / Flatpak can still land incrementally when user demand justifies the extra release ownership.
+ 
+ ### Out of scope (later phases)
+ 
+ - AppImage signing (`--signed`) — deferred pending a GPG key infrastructure decision and a user-facing verification flow design (no ETA).
+ - AppImage auto-update feed (`latest-linux.yml`) — the linux electron-builder config has no `publish` block wired, so a generated feed would point users at a feed that never updates. Tracked alongside signing.
+-- Additional package formats: `.deb`, `.rpm`, Snap, Flatpak — deferred until there is demand and an owner for per-distro metadata, signing/store/repository plumbing, install/remove hooks, and release validation.
+-- Full Linux AppImage and headless packaged smoke remain outside the main PR gate; run the applicable tools-pack validation manually or through a release lane when Linux packaging changes.
++- `.deb` build is supported via `--to deb` — a standards-compliant Debian package (`Package: open-design`, install under `/opt/OpenDesign`, section `devel`, RFC822 maintainer, `libc6` + t64-aware `depends`, DEP-5 `copyright`, a valid Debian `changelog`, and a `/usr/share/lintian/overrides` file documenting the bundled-Electron deviations; verified with `dpkg-deb`, `lintian`, and a real boot). Current scope is **build-only**:
++  - the tools-pack lifecycle (`install`/`start`/`stop`) and its smoke coverage stay **AppImage-only** — there is no `dpkg -i` acceptance smoke yet (planned);
++  - the release pipeline (`tools/release`), CI, and the landing page are **not** wired for `.deb` in this increment (release-lane wiring is a separate change);
++  - package **signing** and an **APT repository** remain deferred (GPG key + hosting decision).
++- `.rpm` is the planned next increment — `linux.maintainer` is already rpm-ready — but needs its own per-distro `depends`/section and `rpmlint` + install validation, so it is deferred rather than shipped untested.
++- Snap, Flatpak — deferred until there is demand and an owner for per-distro metadata, signing/store/repository plumbing, install/remove hooks, and release validation.
++- Full Linux AppImage PR smoke remains release-lane only; PR validation runs the Linux headless packaged smoke because it does not require a display server.
+ 
+ `--to dmg` is manual-install DMG output only. Any builder-generated updater metadata such as `latest-mac.yml` or
+ `.blockmap` files is treated as scratch and cleaned from the builder directory; release-beta generates the authoritative
+diff --git a/tools/pack/resources/linux/debian/changelog.template b/tools/pack/resources/linux/debian/changelog.template
+new file mode 100644
+index 000000000..016c74cc4
+--- /dev/null
++++ b/tools/pack/resources/linux/debian/changelog.template
+@@ -0,0 +1,5 @@
++@@PACKAGE@@ (@@VERSION@@) unstable; urgency=medium
++
++  * Packaged release.
++
++ -- Open Design Contributors <contributors@open-design.ai>  @@DATE@@
+diff --git a/tools/pack/resources/linux/debian/copyright b/tools/pack/resources/linux/debian/copyright
+new file mode 100644
+index 000000000..273fe39e9
+--- /dev/null
++++ b/tools/pack/resources/linux/debian/copyright
+@@ -0,0 +1,17 @@
++Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
++Upstream-Name: Open Design
++Source: https://github.com/nexu-io/open-design
++
++Files: *
++Copyright: 2024-2026 Open Design Contributors
++License: Apache-2.0
++
++License: Apache-2.0
++ Licensed under the Apache License, Version 2.0 (the "License");
++ you may not use this file except in compliance with the License.
++ You may obtain a copy of the License at
++ .
++     https://www.apache.org/licenses/LICENSE-2.0
++ .
++ On Debian systems, the full text of the Apache License version 2.0 can be
++ found in the file /usr/share/common-licenses/Apache-2.0.
+diff --git a/tools/pack/resources/linux/debian/lintian-overrides b/tools/pack/resources/linux/debian/lintian-overrides
+new file mode 100644
+index 000000000..ae8b066e2
+--- /dev/null
++++ b/tools/pack/resources/linux/debian/lintian-overrides
+@@ -0,0 +1,54 @@
++# Open Design ships as a bundled Electron application: the package carries its own
++# Electron/Chromium runtime and a production node_modules tree. The tags below are
++# inherent to that model — the same class of deviations VS Code, Slack and Discord
++# document via their own /usr/share/lintian/overrides file. They are assumed and
++# recorded here rather than "fixed", which would mean unbundling the runtime.
++
++# --- Third-party install location (FHS /opt, not the Debian archive) ---
++open-design: dir-or-file-in-opt
++
++# --- Bundled runtime libraries / binaries (Electron, Chromium, prebuilt *.node) ---
++open-design: embedded-library
++open-design: embedded-javascript-library
++open-design: unstripped-binary-or-object
++open-design: statically-linked-binary
++open-design: shared-library-is-executable
++open-design: odd-permissions-on-shared-library
++open-design: hardening-no-pie
++open-design: hardening-no-relro
++
++# --- Permissions of the bundled tree (as produced by electron-builder) ---
++open-design: non-standard-file-perm
++open-design: non-standard-dir-perm
++open-design: non-standard-executable-perm
++open-design: executable-not-elf-or-script
++
++# --- Bundled fonts / web assets that reference external resources ---
++open-design: duplicate-font-file
++open-design: opentype-font-prohibits-installable-embedding
++open-design: privacy-breach-generic
++open-design: privacy-breach-uses-embedded-file
++open-design: privacy-breach-twitter
++
++# --- Bundled scripts executed by the app's own Node/Electron runtime, or shipped
++#     for other platforms and never run by a system interpreter on Linux, so their
++#     interpreters are intentionally not package dependencies. ---
++open-design: missing-dep-for-interpreter
++open-design: python3-script-but-no-python3-dep
++open-design: unusual-interpreter
++open-design: script-not-executable
++
++# --- fpm-emitted control fields (informational; not standard Debian control
++#     fields). The authoritative license lives in the DEP-5 copyright file. ---
++open-design: unknown-field Vendor
++open-design: unknown-field License
++
++# --- electron-builder maintainer scripts (update-alternatives symlink management) ---
++open-design: maintainer-script-ignores-errors
++open-design: command-with-path-in-maintainer-script
++open-design: postrm-removes-alternative
++
++# --- Misc bundled-tree artifacts ---
++open-design: package-contains-timestamped-gzip
++open-design: package-contains-vcs-control-file
++open-design: missing-depends-on-sensible-utils
+diff --git a/tools/pack/src/config/index.ts b/tools/pack/src/config/index.ts
+index 651702344..51cbe0a93 100644
+--- a/tools/pack/src/config/index.ts
++++ b/tools/pack/src/config/index.ts
+@@ -36,7 +36,7 @@ function resolveToolPackRoot(startDir: string): string {
+ export const WORKSPACE_ROOT = resolve(resolveToolPackRoot(__dirname), "../..");
+ 
+ export type ToolPackPlatform = "mac" | "win" | "linux";
+-export type ToolPackBuildOutput = "all" | "app" | "appimage" | "dir" | "dmg" | "nsis" | "zip";
++export type ToolPackBuildOutput = "all" | "app" | "appimage" | "deb" | "dir" | "dmg" | "nsis" | "zip";
+ export type ToolPackMacCompression = "store" | "normal" | "maximum";
+ export type ToolPackWebOutputMode = "server" | "standalone";
+ export type ToolPackAmrProfile = "prod" | "test" | "feature-test" | "local";
+@@ -179,7 +179,7 @@ function resolveToolPackBuildOutput(platform: ToolPackPlatform, value: string |
+   if (value == null || value.length === 0) return platform === "win" ? "nsis" : "all";
+   if (platform === "mac" && (value === "all" || value === "app" || value === "dmg" || value === "zip")) return value;
+   if (platform === "win" && (value === "all" || value === "dir" || value === "nsis" || value === "zip")) return value;
+-  if (platform === "linux" && (value === "all" || value === "appimage" || value === "dir")) return value;
++  if (platform === "linux" && (value === "all" || value === "appimage" || value === "deb" || value === "dir")) return value;
+   throw new Error(`unsupported ${platform} --to target: ${value}`);
+ }
+ 
+diff --git a/tools/pack/src/index.ts b/tools/pack/src/index.ts
+index d79c7f75a..253894c27 100644
+--- a/tools/pack/src/index.ts
++++ b/tools/pack/src/index.ts
+@@ -80,7 +80,7 @@ function addSharedOptions(command: CacCommand) {
+ // config.ts. Keep these in sync: the resolver throws on any value not listed
+ // here for the given platform.
+ const TO_HELP_BY_PLATFORM: Record<ToolPackPlatform, string> = {
+-  linux: "build target: all|appimage|dir (default: all)",
++  linux: "build target: all|appimage|deb|dir (default: all)",
+   mac: "build target: all|app|dmg|zip (default: all)",
+   win: "build target: all|dir|nsis|zip (default: nsis). `zip` produces a portable zip from the unpacked build; `all` produces dir+nsis+zip.",
+ };
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index f447274d1..cc7523810 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -144,7 +144,7 @@ export function buildDockerArgs(
+   //   - config.namespace is sanitized at config-time by resolveNamespace() in
+   //     @open-design/sidecar-proto (restricted to namespace charset)
+   //   - config.to is enum-validated by resolveToolPackBuildOutput() in config.ts
+-  //     to one of "all" | "appimage" | "dir"
++  //     to one of "all" | "appimage" | "deb" | "dir"
+   //   - config.portable is a boolean
+   //   - config.appVersion is shell-quoted below because release versions can
+   //     carry punctuation that is not part of the namespace / target enums.
+@@ -591,12 +591,135 @@ async function writeLinuxAppImageAppRun(paths: LinuxPaths): Promise<void> {
+ 
+ // --- Step 5: writeLinuxBuilderConfig helper ---
+ 
++// Maps the tools-pack `--to` target to the electron-builder Linux target list.
++// "dir" produces an unpacked tree, "deb" a Debian package, and everything else
++// ("appimage"/"all") an AppImage — the historical default.
++//
++// Note: on Linux `all` == AppImage only, which is intentionally NOT symmetric with
++// Windows (`all` == dir+nsis+zip). The deb build is a SEPARATE electron-builder run:
++// its productName ("OpenDesign", for a path-safe /opt) is mutually exclusive with
++// the AppImage's ("Open Design"), so they cannot be produced in one combined run.
++// `all` therefore stays AppImage-only; build the deb explicitly with `--to deb`.
++export function resolveLinuxBuilderTargets(to: ToolPackConfig["to"]): string[] {
++  if (to === "dir") return ["dir"];
++  if (to === "deb") return ["deb"];
++  return ["AppImage"];
++}
++
++// The AppRun wrapper and its extraFiles injection are AppImage-only concerns.
++// deb/dir builds must not receive them: a .deb installs Electron directly under
++// /opt and symlinks the executable into /usr/bin, with no FUSE AppRun shim.
++export function linuxBuildsAppImage(to: ToolPackConfig["to"]): boolean {
++  return to === "all" || to === "appimage";
++}
++
++// Debian archive package name, install directory, and display name. These are
++// deliberately distinct concerns that electron-builder couples to a single
++// `productName`:
++//   - DEB_PACKAGE_NAME  -> control `Package:` + /usr/share/doc/<name> (via fpm)
++//   - DEB_PRODUCT_NAME  -> /opt/<dir> and the executable base (path-safe, no space)
++//   - DEB_DISPLAY_NAME  -> the .desktop `Name=` shown in menus (keeps the brand)
++const DEB_PACKAGE_NAME = "open-design";
++const DEB_PRODUCT_NAME = "OpenDesign";
++const DEB_DISPLAY_NAME = "Open Design";
++
++// electron-builder ships no machine-readable copyright (lintian: no-copyright-file,
++// an error) and an auto-generated changelog that lintian rejects as "not a Debian
++// changelog". Stage the checked-in DEP-5 copyright and render the Debian changelog
++// template (from tools/pack/resources/linux/debian/), then map them into the
++// package via fpm args. Returns their staged paths.
++async function writeDebMetadataFiles(
++  paths: LinuxPaths,
++  version: string,
++): Promise<{ copyrightPath: string; changelogPath: string; lintianOverridesPath: string }> {
++  const metaDir = join(dirname(paths.appBuilderConfigPath), "deb-meta");
++  await mkdir(metaDir, { recursive: true });
++
++  // Copyright is fully static — copy the checked-in DEP-5 file verbatim.
++  const copyrightPath = join(metaDir, "copyright");
++  await cp(linuxResources.debianCopyright, copyrightPath);
++
++  // lintian overrides: a static, checked-in file documenting the deviations
++  // inherent to a bundled Electron package (see the file for rationale).
++  const lintianOverridesPath = join(metaDir, "lintian-overrides");
++  await cp(linuxResources.debianLintianOverrides, lintianOverridesPath);
++
++  // Changelog carries the build version and date; render the template. The date
++  // must be RFC 5322 with a numeric zone — toUTCString gives the correct
++  // day-of-week and "... GMT", which we rewrite to "+0000".
++  const changelogPath = join(metaDir, "changelog");
++  const date = new Date().toUTCString().replace(/ GMT$/, " +0000");
++  const changelogTemplate = await readFile(linuxResources.debianChangelogTemplate, "utf8");
++  const changelog = changelogTemplate
++    .replace(/@@PACKAGE@@/g, DEB_PACKAGE_NAME)
++    .replace(/@@VERSION@@/g, version)
++    .replace(/@@DATE@@/g, date);
++  await writeFile(changelogPath, changelog, "utf8");
++
++  return { copyrightPath, changelogPath, lintianOverridesPath };
++}
++
++/**
++ * electron-builder `files` patterns for the Linux bundle: everything in the
++ * assembled app minus the node_modules cruft no Linux runtime needs. Keeping it
++ * out is what makes the .deb clean (lintian) and smaller; every exclusion below
++ * names the tag or the bytes it removes.
++ *
++ * `hostArch` is Node's `process.arch` of the machine producing the bundle
++ * (electron-builder targets the host arch): prebuilt native binaries for every
++ * other platform/arch are dropped. Anything not listed is kept, so a new
++ * multi-platform dependency shows up in lintian before it silently bloats the
++ * package.
++ */
++export function linuxBundledFilePatterns(hostArch: string): string[] {
++  const arch = hostArch === "arm64" ? "arm64" : "x64";
++  const otherArch = arch === "x64" ? "arm64" : "x64";
++  return [
++    "**/*",
++    "!**/node_modules/.bin",
++    "!**/node_modules/electron{,/**/*}",
++    // eslint configs (package-contains-eslint-config-file) and node-pty's
++    // Windows-only winpty build sources (its python helper scripts trip
++    // python3-script-but-no-python3-dep on Linux, where they never run).
++    "!**/.eslintrc{,.*}",
++    "!**/eslint.config.{js,cjs,mjs,ts}",
++    "!**/node_modules/node-pty/deps/winpty{,/**/*}",
++    // Editor backup files published by mistake in @ffmpeg-installer/ffmpeg
++    // (backup-file-in-package).
++    "!**/*~",
++    // node-pty ships prebuilt bindings for every platform; only the Linux
++    // ones can load here.
++    "!**/node_modules/node-pty/prebuilds/{darwin,win32}-*{,/**/*}",
++    // onnxruntime-node (via hyperframes) bundles every platform and arch
++    // (binary-from-other-architecture, ~100 MB), plus the CUDA/TensorRT
++    // execution providers for linux (~345 MB) that need a CUDA toolkit this
++    // package does not depend on. hyperframes falls back to the CPU provider
++    // when they are absent.
++    "!**/node_modules/onnxruntime-node/bin/napi-v3/{darwin,win32}{,/**/*}",
++    `!**/node_modules/onnxruntime-node/bin/napi-v3/linux/${otherArch}{,/**/*}`,
++    `!**/node_modules/onnxruntime-node/bin/napi-v3/linux/${arch}/libonnxruntime_providers_{cuda,tensorrt}.so`,
++  ];
++}
++
+ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths): Promise<void> {
+-  const target = config.to === "dir" ? ["dir"] : ["AppImage"];
++  const target = resolveLinuxBuilderTargets(config.to);
++  const buildsAppImage = linuxBuildsAppImage(config.to);
+   const namespaceToken = sanitizeNamespace(config.namespace);
+   const packagedVersion = await readPackagedVersion(config);
+   const packageVersion = electronBuilderVersionForAppVersion(packagedVersion);
+ 
++  // The deb installs to /opt and symlinks into /usr/bin, so its product/executable
++  // names must be path-safe (no space). The AppImage keeps "Open Design" because
++  // matchesAppImageProcess and the AppRun wrapper match that exact binary name.
++  const isDeb = config.to === "deb";
++  const linuxProductName = isDeb ? DEB_PRODUCT_NAME : PRODUCT_NAME;
++  const linuxExecutableName = isDeb ? DEB_PACKAGE_NAME : PRODUCT_NAME;
++  const debMeta = isDeb ? await writeDebMetadataFiles(paths, packageVersion) : null;
++  // Distinct one-line synopsis + a concise single-line description. A bare
++  // product-name description trips lintian's description-is-pkg-name.
++  const linuxSynopsis = "Local-first design agent driven by your installed code CLI";
++  const linuxDescription = "Runs design skills and design systems, previewing artifacts in a sandbox.";
++
+   const builderConfig: Record<string, unknown> = {
+     appId: "io.open-design.desktop",
+     artifactName: `${PRODUCT_NAME}-${namespaceToken}.\${ext}`,
+@@ -612,11 +735,11 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+     // See tools/pack/src/win/builder.ts: rely on electron-builder's own
+     // Electron download rather than node_modules' dist, which pnpm does not
+     // reliably materialize on CI runners.
+-    executableName: PRODUCT_NAME,
++    executableName: linuxExecutableName,
+     extraMetadata: {
+       main: "./main.cjs",
+       name: "open-design-packaged-app",
+-      productName: PRODUCT_NAME,
++      productName: linuxProductName,
+       version: packageVersion,
+       ...(config.portable ? {} : { odToolsPackRuntimeRoot: config.roots.runtime.namespaceBaseRoot }),
+     },
+@@ -627,25 +750,118 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+       // process.resourcesPath by the desktop main at runtime).
+       domToPptxBundleResource(config),
+     ],
+-    ...(config.to === "dir"
+-      ? {}
+-      : {
++    ...(buildsAppImage
++      ? {
+           extraFiles: [
+             {
+               from: paths.appImageAppRunPath,
+               to: "AppRun",
+             },
+           ],
+-        }),
+-    files: ["**/*", "!**/node_modules/.bin", "!**/node_modules/electron{,/**/*}"],
++        }
++      : {}),
++    files: linuxBundledFilePatterns(process.arch),
+     icon: linuxResources.icon,
+     linux: {
+       target,
+       icon: linuxResources.icon,
+       category: "Development",
+-      synopsis: "Open Design",
+-      maintainer: "Open Design Contributors",
++      synopsis: linuxSynopsis,
++      description: linuxDescription,
++      // Path-safe product name (OpenDesign) keeps /opt and /usr/bin clean, but the
++      // menu entry should still show the real brand. Override the .desktop Name so
++      // the display stays "Open Design" regardless of the executable/dir name.
++      desktop: { entry: { Name: DEB_DISPLAY_NAME } },
++      // Debian Policy requires an RFC822 `Maintainer: Name <email>`; a bare name
++      // trips lintian's maintainer-address-malformed. Community project → a neutral
++      // project role address, never a personal one (it is shown by `apt show` on
++      // every install). Maintainers can point this at their preferred packaging
++      // contact. Used for deb (and rpm) via electron-builder's shared linux.maintainer.
++      maintainer: "Open Design Contributors <contributors@open-design.ai>",
+     },
++    // Debian package metadata. Only consulted when the `deb` target is built.
++    // `deb.depends` is set explicitly below (not left to electron-builder's
++    // defaults): overriding REPLACES — does not merge — the whole list, so it must
++    // carry every runtime dep itself, including libc6 and the t64-aware libraries.
++    // The artifactName follows the Debian convention `<pkg>_<version>_<arch>.deb`
++    // (lowercase, no spaces), unlike the AppImage which keeps the product name.
++    // Gate on debMeta (non-null iff the deb target is built) rather than
++    // re-testing config.to: this lets TypeScript narrow debMeta to non-null
++    // inside the block, so the fpm passthrough needs no non-null assertions.
++    ...(debMeta
++      ? {
++          deb: {
++            priority: "optional",
++            // Debian archive Section. fpm/electron-builder otherwise emit
++            // `Section: default`, which lintian flags as unknown-section. "devel"
++            // is the Debian section for development tools, matching the freedesktop
++            // Development category above.
++            packageCategory: "devel",
++            // fpm passthrough for the deb only:
++            //   --name          -> Debian `Package:` field. electron-builder would
++            //                      otherwise derive it from the internal Electron app
++            //                      name (`open-design-packaged-app`), a cross-platform
++            //                      build identity, not a distro package name. The
++            //                      Debian Package name is independent of the npm name,
++            //                      so this touches nothing macOS/Windows/launcher use.
++            //   --deb-changelog -> replaces electron-builder's invalid auto changelog.
++            //   --license       -> fills the fpm License field (else "unknown").
++            //   copyright=...   -> DEP-5 copyright at /usr/share/doc/<pkg>/copyright
++            //                      (electron-builder ships none: lintian no-copyright-file).
++            //   lintian-overrides=... -> documents the assumed bundled-Electron
++            //                      deviations at /usr/share/lintian/overrides/<pkg>.
++            //   --description  -> electron-builder already indents the extended
++            //                      description line, then fpm indents it again
++            //                      (description-starts-with-leading-spaces); passing
++            //                      the raw two-line text here lets fpm indent once.
++            fpm: [
++              "--name",
++              DEB_PACKAGE_NAME,
++              "--description",
++              `${linuxSynopsis}\n${linuxDescription}`,
++              "--license",
++              "Apache-2.0",
++              "--deb-changelog",
++              debMeta.changelogPath,
++              `${debMeta.copyrightPath}=/usr/share/doc/${DEB_PACKAGE_NAME}/copyright`,
++              `${debMeta.lintianOverridesPath}=/usr/share/lintian/overrides/${DEB_PACKAGE_NAME}`,
++            ],
++            // Debian-standard filename `<package>_<version>_<arch>.deb`. The
++            // namespace is intentionally omitted (unlike the AppImage artifact):
++            // each namespace already writes to its own output directory, so the
++            // token adds nothing here and would break the Debian convention.
++            // Release channels stay distinguishable through the version suffix
++            // (e.g. 0.15.1-beta.1) baked into ${version}.
++            artifactName: "open-design_${version}_${arch}.deb",
++            // Runtime shared libraries for an Electron 41 app. electron-builder's
++            // defaults already resolve on Debian, but we spell out the intent and
++            // alternate the two libraries renamed by the time_t 64-bit (t64)
++            // transition so resolution never relies solely on compat `Provides:`:
++            //   - libgtk-3-0     -> libgtk-3-0t64     (trixie+/sid)
++            //   - libatspi2.0-0  -> libatspi2.0-0t64  (trixie+/sid)
++            // Verified installable on bookworm (native names) and trixie/sid.
++            depends: [
++              // electron-builder's baseline deb.depends (which we replace here)
++              // omits libc6; hardcoding the list drops the shlib-scanned libc dep,
++              // so declare it explicitly (lintian: missing-dependency-on-libc).
++              "libc6",
++              "libgtk-3-0 | libgtk-3-0t64",
++              "libnotify4",
++              "libnss3",
++              "libxss1",
++              "libxtst6",
++              "xdg-utils",
++              "libatspi2.0-0 | libatspi2.0-0t64",
++              "libuuid1",
++              "libsecret-1-0",
++            ],
++            // System-tray indicator is optional. libappindicator3-1 was removed
++            // from bookworm/trixie/sid; the Ayatana fork provides it, so prefer it
++            // and fall back to the historical name.
++            recommends: ["libayatana-appindicator3-1 | libappindicator3-1"],
++          },
++        }
++      : {}),
+     // Keep the AppImage launch fallback explicit. Our top-level AppRun wrapper
+     // clears ELECTRON_RUN_AS_NODE before these Chromium flags reach Electron,
+     // including for AppImageLauncher-generated desktop entries.
+@@ -654,7 +870,7 @@ async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: LinuxPaths
+     },
+     nodeGypRebuild: false,
+     npmRebuild: false,
+-    productName: PRODUCT_NAME,
++    productName: linuxProductName,
+   };
+ 
+   await mkdir(dirname(paths.appBuilderConfigPath), { recursive: true });
+@@ -685,17 +901,22 @@ async function runElectronBuilderLinux(config: ToolPackConfig, paths: LinuxPaths
+   );
+ }
+ 
+-async function findBuiltAppImage(paths: LinuxPaths): Promise<string | null> {
++async function findBuiltArtifact(paths: LinuxPaths, ext: string): Promise<string | null> {
+   if (!(await pathExists(paths.appBuilderOutputRoot))) return null;
+   const entries = await readdir(paths.appBuilderOutputRoot);
+-  const appImage = entries.find((entry) => entry.endsWith(".AppImage"));
+-  return appImage ? join(paths.appBuilderOutputRoot, appImage) : null;
++  const match = entries.find((entry) => entry.endsWith(ext));
++  return match ? join(paths.appBuilderOutputRoot, match) : null;
++}
++
++async function findBuiltAppImage(paths: LinuxPaths): Promise<string | null> {
++  return findBuiltArtifact(paths, ".AppImage");
+ }
+ 
+ // --- Step 7: packLinux orchestrator + result type + stub for runBuildInContainer ---
+ 
+ export type LinuxPackResult = {
+   appImagePath: string | null;
++  debPath: string | null;
+   outputRoot: string;
+   resourceRoot: string;
+   runtimeNamespaceRoot: string;
+@@ -707,9 +928,11 @@ export async function packLinux(config: ToolPackConfig): Promise<LinuxPackResult
+   if (config.containerized) {
+     await runBuildInContainer(config);
+     const paths = resolveLinuxPaths(config);
+-    const appImagePath = config.to === "dir" ? null : await findBuiltAppImage(paths);
++    const appImagePath = linuxBuildsAppImage(config.to) ? await findBuiltAppImage(paths) : null;
++    const debPath = config.to === "deb" ? await findBuiltArtifact(paths, ".deb") : null;
+     return {
+       appImagePath,
++      debPath,
+       outputRoot: paths.appBuilderOutputRoot,
+       resourceRoot: paths.resourceRoot,
+       runtimeNamespaceRoot: config.roots.runtime.namespaceRoot,
+@@ -727,19 +950,21 @@ export async function packLinux(config: ToolPackConfig): Promise<LinuxPackResult
+   await copyResourceTree(config, paths);
+   const tarballs = await collectWorkspaceTarballs(config, paths);
+   await writeAssembledApp(config, paths, tarballs);
+-  if (config.to !== "dir") {
++  if (linuxBuildsAppImage(config.to)) {
+     await writeLinuxAppImageAppRun(paths);
+   }
+   await writeLinuxBuilderConfig(config, paths);
+   await runElectronBuilderLinux(config, paths);
+ 
+-  const appImagePath = config.to === "dir" ? null : await findBuiltAppImage(paths);
+-  if (config.to !== 'dir') {
++  const appImagePath = linuxBuildsAppImage(config.to) ? await findBuiltAppImage(paths) : null;
++  const debPath = config.to === "deb" ? await findBuiltArtifact(paths, ".deb") : null;
++  if (linuxBuildsAppImage(config.to)) {
+     if (appImagePath == null) throw new Error('Linux build did not produce an AppImage to verify');
+     await assertLinuxAppImageNativeModules(appImagePath);
+   }
+   return {
+     appImagePath,
++    debPath,
+     outputRoot: paths.appBuilderOutputRoot,
+     resourceRoot: paths.resourceRoot,
+     runtimeNamespaceRoot: config.roots.runtime.namespaceRoot,
+diff --git a/tools/pack/src/resources/index.ts b/tools/pack/src/resources/index.ts
+index dcab8ab88..c22cecd51 100644
+--- a/tools/pack/src/resources/index.ts
++++ b/tools/pack/src/resources/index.ts
+@@ -55,6 +55,12 @@ export const winResources = {
+ export const linuxResources = {
+   icon: join(resourcesRoot, "linux", "icon.png"),
+   desktopTemplate: join(resourcesRoot, "linux", "open-design.desktop.template"),
++  // Debian-specific packaging assets, kept as files under a `debian/` directory
++  // (mirroring the Debian maintainer convention) instead of inline strings. These
++  // feed the `deb` target's fpm source=destination / --deb-changelog args.
++  debianCopyright: join(resourcesRoot, "linux", "debian", "copyright"),
++  debianChangelogTemplate: join(resourcesRoot, "linux", "debian", "changelog.template"),
++  debianLintianOverrides: join(resourcesRoot, "linux", "debian", "lintian-overrides"),
+ } as const;
+ 
+ const BUNDLED_RESOURCE_TREES = [
+diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
+index 5cb59545c..7a66ccc9b 100644
+--- a/tools/pack/tests/linux.test.ts
++++ b/tools/pack/tests/linux.test.ts
+@@ -60,8 +60,11 @@ import {
+   createLinuxDesktopLaunchEnv,
+   inspectPackedLinuxApp,
+   LINUX_APPIMAGE_EXECUTABLE_ARGS,
++  linuxBuildsAppImage,
++  linuxBundledFilePatterns,
+   matchesAppImageProcess,
+   renderDesktopTemplate,
++  resolveLinuxBuilderTargets,
+   renderLinuxAppImageAppRun,
+   renderLinuxPackagedMainEntry,
+   resolveLinuxLifecycleMode,
+@@ -781,6 +784,96 @@ describe("resolveLinuxLifecycleMode", () => {
+   });
+ });
+ 
++describe("linuxBundledFilePatterns", () => {
++  // Paths as they appear in the assembled app, relative to its root.
++  const bundledCruft = [
++    "node_modules/@ffmpeg-installer/ffmpeg/index.js~",
++    "node_modules/@ffmpeg-installer/ffmpeg/lib/manifest.js~",
++    "node_modules/node-pty/prebuilds/win32-x64/pty.node",
++    "node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper",
++    "node_modules/onnxruntime-node/bin/napi-v3/darwin/x64/libonnxruntime.1.21.1.dylib",
++    "node_modules/onnxruntime-node/bin/napi-v3/win32/arm64/onnxruntime_binding.node",
++    "node_modules/onnxruntime-node/bin/napi-v3/linux/x64/libonnxruntime_providers_cuda.so",
++    "node_modules/onnxruntime-node/bin/napi-v3/linux/x64/libonnxruntime_providers_tensorrt.so",
++  ];
++  const linuxX64Runtime = [
++    "node_modules/node-pty/prebuilds/linux-x64/pty.node",
++    "node_modules/onnxruntime-node/bin/napi-v3/linux/x64/onnxruntime_binding.node",
++    "node_modules/onnxruntime-node/bin/napi-v3/linux/x64/libonnxruntime.so.1",
++    "node_modules/onnxruntime-node/bin/napi-v3/linux/x64/libonnxruntime_providers_shared.so",
++    "node_modules/@ffmpeg-installer/ffmpeg/index.js",
++  ];
++
++  // Mirrors electron-builder's `files` semantics closely enough for these
++  // patterns: the last matching rule wins, `!` negates.
++  function bundled(patterns: string[], file: string): boolean {
++    let keep = false;
++    for (const pattern of patterns) {
++      const negated = pattern.startsWith("!");
++      const glob = negated ? pattern.slice(1) : pattern;
++      if (globMatches(glob, file)) keep = !negated;
++    }
++    return keep;
++  }
++  function expandBraces(glob: string): string[] {
++    const match = /\{([^{}]*)\}/.exec(glob);
++    if (!match) return [glob];
++    return match[1]
++      .split(",")
++      .flatMap((alt) => expandBraces(glob.slice(0, match.index) + alt + glob.slice(match.index + match[0].length)));
++  }
++  function globMatches(glob: string, file: string): boolean {
++    return expandBraces(glob).some((variant) => {
++      const source = variant
++        .split(/(\*\*\/|\*\*|\*)/)
++        .map((part) => (part === "**/" ? "(?:.*/)?" : part === "**" ? ".*" : part === "*" ? "[^/]*" : escape(part)))
++        .join("");
++      return new RegExp(`^${source}$`).test(file);
++    });
++  }
++  function escape(value: string): string {
++    return value.replace(/[.+^$()|[\]\\?]/g, "\\$&");
++  }
++
++  it("drops foreign-platform binaries, GPU providers and backup files on x64", () => {
++    const patterns = linuxBundledFilePatterns("x64");
++    for (const file of bundledCruft) expect(bundled(patterns, file), file).toBe(false);
++    for (const file of linuxX64Runtime) expect(bundled(patterns, file), file).toBe(true);
++    expect(bundled(patterns, "node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/libonnxruntime.so.1")).toBe(false);
++  });
++
++  it("keeps the arm64 linux runtime and drops x64 when building on arm64", () => {
++    const patterns = linuxBundledFilePatterns("arm64");
++    expect(bundled(patterns, "node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/libonnxruntime.so.1")).toBe(true);
++    expect(bundled(patterns, "node_modules/onnxruntime-node/bin/napi-v3/linux/x64/libonnxruntime.so.1")).toBe(false);
++    expect(bundled(patterns, "node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/libonnxruntime_providers_cuda.so")).toBe(false);
++  });
++});
++
++describe("resolveLinuxBuilderTargets", () => {
++  it("maps deb to the electron-builder deb target", () => {
++    expect(resolveLinuxBuilderTargets("deb")).toEqual(["deb"]);
++  });
++
++  it("maps dir to an unpacked build", () => {
++    expect(resolveLinuxBuilderTargets("dir")).toEqual(["dir"]);
++  });
++
++  it("defaults appimage and all to AppImage", () => {
++    expect(resolveLinuxBuilderTargets("appimage")).toEqual(["AppImage"]);
++    expect(resolveLinuxBuilderTargets("all")).toEqual(["AppImage"]);
++  });
++});
++
++describe("linuxBuildsAppImage", () => {
++  it("is true only for appimage/all so deb and dir skip the AppRun wrapper", () => {
++    expect(linuxBuildsAppImage("appimage")).toBe(true);
++    expect(linuxBuildsAppImage("all")).toBe(true);
++    expect(linuxBuildsAppImage("deb")).toBe(false);
++    expect(linuxBuildsAppImage("dir")).toBe(false);
++  });
++});
++
+ describe("shouldRejectLinuxHeadlessInspectOptions", () => {
+   it("allows status-only headless inspect", () => {
+     expect(shouldRejectLinuxHeadlessInspectOptions({})).toBe(false);
+-- 
+2.55.0
+

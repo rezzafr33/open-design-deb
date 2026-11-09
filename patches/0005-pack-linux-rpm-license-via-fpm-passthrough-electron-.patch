@@ -1,0 +1,69 @@
+From 25a52786e0f5f7c6d7f243f5d184eaf07d83974b Mon Sep 17 00:00:00 2001
+From: Kacper Paczos <kacperpaczos2024@proton.me>
+Date: Mon, 5 Oct 2026 22:32:46 +0200
+Subject: [PATCH 05/14] pack(linux): rpm license via fpm passthrough
+ (electron-builder schema fix)
+
+---
+ tools/pack/src/linux.ts        | 19 ++++++++++++-------
+ tools/pack/tests/linux.test.ts |  7 +++++--
+ 2 files changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index f6586a69f..ad606cf89 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -884,17 +884,22 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
+       : {}),
+     // RPM package metadata. Only consulted when the `rpm` target is built. The
+     // `Name:` tag must be lowercase without spaces (rpm convention), so it comes
+-    // from RPM_PACKAGE_NAME instead of the productName. `license` fills the rpm
+-    // License tag (fpm would otherwise emit "unknown"); everything else —
+-    // summary/description, maintainer, release — electron-builder derives from
+-    // the shared linux block above. Deliberately minimal (community target,
+-    // build-only): no per-distro `requires` tuning yet, exactly like deb's
+-    // explicit-target-only contract — `--to all` never produces an rpm.
++    // from RPM_PACKAGE_NAME instead of the productName. The License tag is set
++    // through the fpm passthrough (`--license`), the same mechanism the deb
++    // block uses: electron-builder 26.8.1's rpm config schema has no `license`
++    // key (it validates and rejects one), and its FpmTarget only falls back to
++    // the packaged app's package.json `license` field, which the assembled app
++    // does not carry — without the flag fpm emits `License: unknown`.
++    // Everything else — summary/description, maintainer, release —
++    // electron-builder derives from the shared linux block above. Deliberately
++    // minimal (community target, build-only): no per-distro `requires` tuning
++    // yet, exactly like deb's explicit-target-only contract — `--to all` never
++    // produces an rpm.
+     ...(isRpm
+       ? {
+           rpm: {
+             packageName: RPM_PACKAGE_NAME,
+-            license: "Apache-2.0",
++            fpm: ["--license", "Apache-2.0"],
+           },
+         }
+       : {}),
+diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
+index d6c79d910..1a51f5a3f 100644
+--- a/tools/pack/tests/linux.test.ts
++++ b/tools/pack/tests/linux.test.ts
+@@ -905,11 +905,14 @@ describe("writeLinuxBuilderConfig", () => {
+ 
+       const builderConfig = JSON.parse(await readFile(paths.appBuilderConfigPath, "utf8")) as {
+         linux: { target: string[] };
+-        rpm?: { packageName: string; license: string };
++        rpm?: { packageName: string; fpm: string[] };
+         deb?: unknown;
+       };
+       expect(builderConfig.linux.target).toEqual(["rpm"]);
+-      expect(builderConfig.rpm).toEqual({ packageName: "open-design", license: "Apache-2.0" });
++      expect(builderConfig.rpm).toEqual({
++        packageName: "open-design",
++        fpm: ["--license", "Apache-2.0"],
++      });
+       // Explicit targets only: --to rpm must not leak the deb block (and
+       // --to all never produces an rpm; resolveLinuxBuilderTargets owns that).
+       expect(builderConfig.deb).toBeUndefined();
+-- 
+2.55.0
+

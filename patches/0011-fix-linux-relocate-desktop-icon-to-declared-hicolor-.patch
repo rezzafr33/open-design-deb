@@ -1,0 +1,133 @@
+From 2a98c9642a3aa10e418c8bdd5694414f74330369 Mon Sep 17 00:00:00 2001
+From: Kacper Paczos <kacperpaczos2024@proton.me>
+Date: Tue, 6 Oct 2026 13:33:55 +0200
+Subject: [PATCH 11/14] fix(linux): relocate desktop icon to declared hicolor
+ 512x512 (spec fix)
+
+---
+ .../resources/linux/desktop-icon-fixup.sh     | 27 +++++++++++++++++++
+ .../pack/resources/linux/rpm-after-install.sh | 16 -----------
+ tools/pack/src/linux.ts                       |  8 +++++-
+ tools/pack/src/resources/index.ts             |  9 ++++---
+ tools/pack/tests/linux.test.ts                |  2 +-
+ 5 files changed, 40 insertions(+), 22 deletions(-)
+ create mode 100755 tools/pack/resources/linux/desktop-icon-fixup.sh
+ delete mode 100755 tools/pack/resources/linux/rpm-after-install.sh
+
+diff --git a/tools/pack/resources/linux/desktop-icon-fixup.sh b/tools/pack/resources/linux/desktop-icon-fixup.sh
+new file mode 100755
+index 000000000..76bdc3b37
+--- /dev/null
++++ b/tools/pack/resources/linux/desktop-icon-fixup.sh
+@@ -0,0 +1,27 @@
++#!/bin/sh
++# Post-install icon fixup (deb and rpm): electron-builder installs the icon
++# at its native pixel size — hicolor/1024x1024/apps — but the hicolor theme
++# index declares only the standard sizes (…, 256x256, 512x512, scalable).
++# Per the Icon Theme Specification the lookup iterates exclusively over the
++# declared Directories, so an icon in an undeclared size directory is never
++# found and the menu entry renders without an icon. Move it into the
++# declared 512x512 context and point the entry at the space-free name.
++set -e
++src_dir=/usr/share/icons/hicolor/1024x1024/apps
++dst_dir=/usr/share/icons/hicolor/512x512/apps
++mkdir -p "$dst_dir"
++for name in "open-design.png" "Open Design.png"; do
++  if [ -f "$src_dir/$name" ]; then
++    mv -f "$src_dir/$name" "$dst_dir/open-design.png"
++    break
++  fi
++done
++# The rpm lane names both entry and icon after the display product name;
++# repoint the Icon key at the space-free file (the deb lane is already
++# space-free — the sed is a harmless no-op there).
++entry="/usr/share/applications/Open Design.desktop"
++if [ -f "$entry" ]; then
++  sed -i 's|^Icon=Open Design$|Icon=open-design|' "$entry"
++fi
++gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
++exit 0
+diff --git a/tools/pack/resources/linux/rpm-after-install.sh b/tools/pack/resources/linux/rpm-after-install.sh
+deleted file mode 100755
+index dcb778d17..000000000
+--- a/tools/pack/resources/linux/rpm-after-install.sh
++++ /dev/null
+@@ -1,16 +0,0 @@
+-#!/bin/sh
+-# RPM post-install fixup: KDE cannot resolve icon-theme names containing
+-# spaces, and the rpm target names the desktop entry and icon after the
+-# display product name ("Open Design"). Rename both to the
+-# spec-conventional space-free form so the menu icon renders.
+-set -e
+-icon_dir=/usr/share/icons/hicolor/1024x1024/apps
+-if [ -f "$icon_dir/Open Design.png" ]; then
+-  mv -f "$icon_dir/Open Design.png" "$icon_dir/open-design.png"
+-fi
+-entry="/usr/share/applications/Open Design.desktop"
+-if [ -f "$entry" ]; then
+-  sed -i 's|^Icon=Open Design$|Icon=open-design|' "$entry"
+-fi
+-gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+-exit 0
+diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
+index 773e1596d..551c3130d 100644
+--- a/tools/pack/src/linux.ts
++++ b/tools/pack/src/linux.ts
+@@ -941,6 +941,12 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
+               debMeta.changelogPath,
+               `${debMeta.copyrightPath}=/usr/share/doc/${DEB_PACKAGE_NAME}/copyright`,
+               `${debMeta.lintianOverridesPath}=/usr/share/lintian/overrides/${DEB_PACKAGE_NAME}`,
++              // Relocate the icon from the undeclared hicolor/1024x1024 into
++              // the declared 512x512 context (Icon Theme Specification lookup
++              // never sees undeclared size directories — the menu entry would
++              // render iconless).
++              "--after-install",
++              linuxResources.desktopIconFixup,
+             ],
+             // Debian-standard filename `<package>_<version>_<arch>.deb`. The
+             // namespace is intentionally omitted (unlike the AppImage artifact):
+@@ -1016,7 +1022,7 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
+               // the deb lane needs nothing equivalent (its identity is
+               // already space-free).
+               "--after-install",
+-              linuxResources.rpmAfterInstall,
++              linuxResources.desktopIconFixup,
+             ],
+           },
+         }
+diff --git a/tools/pack/src/resources/index.ts b/tools/pack/src/resources/index.ts
+index 6426e36a0..a70966c96 100644
+--- a/tools/pack/src/resources/index.ts
++++ b/tools/pack/src/resources/index.ts
+@@ -61,10 +61,11 @@ export const linuxResources = {
+   debianCopyright: join(resourcesRoot, "linux", "debian", "copyright"),
+   debianChangelogTemplate: join(resourcesRoot, "linux", "debian", "changelog.template"),
+   debianLintianOverrides: join(resourcesRoot, "linux", "debian", "lintian-overrides"),
+-  // fpm --after-install script for the rpm lane: renames the space-named
+-  // icon and repoints the desktop entry (KDE cannot resolve spaced
+-  // icon-theme names, so the menu icon never renders without this).
+-  rpmAfterInstall: join(resourcesRoot, "linux", "rpm-after-install.sh"),
++  // fpm --after-install script for the deb and rpm lanes: relocates the
++  // icon from the undeclared hicolor/1024x1024 into the declared 512x512
++  // context (Icon Theme Specification lookup ignores undeclared size
++  // directories) and repoints the rpm entry at the space-free name.
++  desktopIconFixup: join(resourcesRoot, "linux", "desktop-icon-fixup.sh"),
+   // Linux counterpart of the shared mac/win web-standalone after-pack hook.
+   // Lives under linux/ (not the shared resources root) because the Linux lane
+   // materializes a self-contained standalone tree without the mac/win pruning,
+diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
+index a908d5d32..359eaea06 100644
+--- a/tools/pack/tests/linux.test.ts
++++ b/tools/pack/tests/linux.test.ts
+@@ -924,7 +924,7 @@ describe("writeLinuxBuilderConfig", () => {
+           // Post-install fixup: the rpm entry/icon keep the spaced product
+           // name, which KDE cannot resolve as an icon-theme name.
+           "--after-install",
+-          expect.stringContaining("rpm-after-install.sh"),
++          expect.stringContaining("desktop-icon-fixup.sh"),
+         ],
+       });
+       // The referenced script must ship with the checkout (fpm runs it at
+-- 
+2.55.0
+
