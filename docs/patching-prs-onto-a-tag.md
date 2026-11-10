@@ -187,12 +187,17 @@ decide the order, so you can continue without it.
 **c) Do they touch the same files?**
 
 ```bash
+rm -f /tmp/files-*                              # clear results from a previous run
 for n in <A> <B>; do
   git diff --name-only "$(git merge-base upstream/main pr-$n)" pr-$n \
     | sort > /tmp/files-$n
 done
 comm -12 /tmp/files-<A> /tmp/files-<B>      # files both PRs change
 ```
+
+This only finds files the two PRs both change. It says nothing about conflicts
+with the tag itself, which are usually the ones that hurt. Section 4.2 covers
+those.
 
 - **No overlap, or only a file or two.** The PRs are independent, and the order
   only affects where small conflicts show up.
@@ -210,6 +215,52 @@ comm -12 /tmp/files-<A> /tmp/files-<B>      # files both PRs change
 first, newer and smaller on top. Whatever you choose, remember that the patch
 numbering (`0001`, `0002`, ...) is the order the build applies them in, so the
 order you cherry-pick in is the order you ship.
+
+### 4.2 Predicting conflicts when you apply the PRs in order
+
+When you replay a PR, it can collide with two things:
+
+1. **The tag.** Upstream commits that landed after the PR branched but before the
+   tag was cut. The tag contains them and the PR does not know about them.
+2. **PRs you applied before it.** If an earlier PR in your series changed the
+   same file, the later one has to merge against that.
+
+A file is at risk when the PR changed it and either of those changed it too.
+Run the PRs in the order you plan to apply them, so each one is checked against
+the tag plus everything applied before it:
+
+```bash
+rm -f /tmp/pr-files-* /tmp/risk-* /tmp/applied-files   # clear previous runs
+: > /tmp/applied-files
+for n in <N> <M> <K>; do                               # in application order
+  base=$(git merge-base upstream/main pr-$n)
+  echo "base of pr-$n: $base"                          # must print a hash
+  git diff --name-only "$base" pr-$n | sort > /tmp/pr-files-$n
+  { git diff --name-only "$base" <TAG>; cat /tmp/applied-files; } | sort -u > /tmp/risk-$n
+  echo "== files at risk for pr-$n:"
+  comm -12 /tmp/pr-files-$n /tmp/risk-$n
+  sort -u /tmp/applied-files /tmp/pr-files-$n -o /tmp/applied-files
+done
+```
+
+Read the result as an upper bound, not a prediction. A file in the list is only
+a conflict if both sides changed the same lines. Git merges the rest
+automatically (you will see `Auto-merging <file>` for those). In practice, only
+some of the listed files actually produce conflict hunks. A file that is not in
+the list will almost always apply cleanly.
+
+If `git merge-base` prints nothing, the clone is probably shallow
+(`git fetch --unshallow upstream`), and the lists above are meaningless until
+it prints a hash.
+
+To see what actually changed upstream in a risky file, read the window:
+
+```bash
+git log --oneline "$(git merge-base upstream/main pr-<N>)"..<TAG> -- <file>
+```
+
+Those commits tell you what code the tag added that the PR's version lacks, and
+what must be kept when you resolve the conflict.
 
 ---
 
