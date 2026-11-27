@@ -1,4 +1,4 @@
-From 25a52786e0f5f7c6d7f243f5d184eaf07d83974b Mon Sep 17 00:00:00 2001
+From ce36e9012d2d4f964bb562872dc12eb7b18a25ea Mon Sep 17 00:00:00 2001
 From: Kacper Paczos <kacperpaczos2024@proton.me>
 Date: Mon, 5 Oct 2026 22:32:46 +0200
 Subject: [PATCH 05/14] pack(linux): rpm license via fpm passthrough
@@ -10,7 +10,7 @@ Subject: [PATCH 05/14] pack(linux): rpm license via fpm passthrough
  2 files changed, 17 insertions(+), 9 deletions(-)
 
 diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
-index f6586a69f..ad606cf89 100644
+index f6586a69fd..ad606cf892 100644
 --- a/tools/pack/src/linux.ts
 +++ b/tools/pack/src/linux.ts
 @@ -884,17 +884,22 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
@@ -44,7 +44,7 @@ index f6586a69f..ad606cf89 100644
          }
        : {}),
 diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
-index d6c79d910..1a51f5a3f 100644
+index d6c79d9106..1a51f5a3f5 100644
 --- a/tools/pack/tests/linux.test.ts
 +++ b/tools/pack/tests/linux.test.ts
 @@ -905,11 +905,14 @@ describe("writeLinuxBuilderConfig", () => {
@@ -65,5 +65,5 @@ index d6c79d910..1a51f5a3f 100644
        // --to all never produces an rpm; resolveLinuxBuilderTargets owns that).
        expect(builderConfig.deb).toBeUndefined();
 -- 
-2.55.0
+2.56.0
 

@@ -4,8 +4,9 @@
 #
 # Layout of this repo:
 #   .github/workflows/build-deb.yml
-#   patches/open-design-linux-packaging.patch   (upstream PR #8589)
-#   patches/opencode-8773.patch                 (upstream PR #8773)
+#   patches/0001-* .. 0012-*.patch   (Linux packaging, upstream PR #8589)
+#   patches/0013-*.patch             (OpenCode 2.x CLI, upstream PR #8773)
+#   patches/0014-*.patch             (OpenCode v2 model variants, upstream PR #9254)
 #
 # Structure/conventions adapted from kacperpaczos/OpenDesign-For-GNU-Linux
 # (linux-packages.yml): corepack pnpm, least-privilege jobs, "<tag>-linux"
@@ -17,9 +18,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Upstream tag to package (our patches are cut for 0.25.0)"
+        description: "Upstream tag to package (patches verified against open-design-v0.27.2)"
         required: false
-        default: "open-design-v0.27.0"
+        default: "open-design-v0.27.2"
         type: string
       force:
         description: "Delete and recreate the release if it already exists (hash changes!)"
@@ -146,7 +147,7 @@ jobs:
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${REL}/${name}"
 
           {
-            echo "Open Design ${TAG} + Linux packaging patch (#8589) + OpenCode 2.x fix (#8773)."
+            echo "Open Design ${TAG} + Linux packaging patch (#8589) + OpenCode 2.x fixes (#8773, #9254)."
             echo
             echo "Nix (pkgs/opendesign.nix):"
             echo

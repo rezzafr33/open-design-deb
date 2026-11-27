@@ -1,4 +1,4 @@
-From 6021dddc844fce40b8336a2e3196870b0038dfd8 Mon Sep 17 00:00:00 2001
+From 44bd932869cb35a6c0849a4bf103a034cd7140fc Mon Sep 17 00:00:00 2001
 From: Kacper Paczos <kacperpaczos2024@proton.me>
 Date: Tue, 6 Oct 2026 00:40:37 +0200
 Subject: [PATCH 07/14] pack(linux): ship web standalone runtime (fix packaged
@@ -47,7 +47,7 @@ equivalent.
  create mode 100644 tools/pack/tests/linux/web-standalone-after-pack.test.ts
 
 diff --git a/scripts/guard.ts b/scripts/guard.ts
-index 25c33bcb1..03d1f27f7 100644
+index 25c33bcb11..03d1f27f71 100644
 --- a/scripts/guard.ts
 +++ b/scripts/guard.ts
 @@ -150,6 +150,9 @@ const residualAllowedExactPaths = new Set([
@@ -62,7 +62,7 @@ index 25c33bcb1..03d1f27f7 100644
  const residualAllowedPathPrefixes = [
 diff --git a/tools/pack/resources/linux/web-standalone-after-pack.cjs b/tools/pack/resources/linux/web-standalone-after-pack.cjs
 new file mode 100644
-index 000000000..d4bd4633d
+index 0000000000..d4bd4633d5
 --- /dev/null
 +++ b/tools/pack/resources/linux/web-standalone-after-pack.cjs
 @@ -0,0 +1,401 @@
@@ -468,7 +468,7 @@ index 000000000..d4bd4633d
 +  }
 +};
 diff --git a/tools/pack/src/config/index.ts b/tools/pack/src/config/index.ts
-index 934e7c9db..24e680fad 100644
+index 934e7c9dba..24e680fad6 100644
 --- a/tools/pack/src/config/index.ts
 +++ b/tools/pack/src/config/index.ts
 @@ -204,10 +204,14 @@ function defaultNamespaceForAppVersion(platform: ToolPackPlatform, appVersion: s
@@ -491,7 +491,7 @@ index 934e7c9db..24e680fad 100644
    if (value === "server" || value === "standalone") return value;
    throw new Error(`unsupported OD_WEB_OUTPUT_MODE value: ${value}`);
 diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
-index ad606cf89..1b5a0277b 100644
+index ad606cf892..1b5a0277b5 100644
 --- a/tools/pack/src/linux.ts
 +++ b/tools/pack/src/linux.ts
 @@ -48,6 +48,17 @@ const execFileAsync = promisify(execFile);
@@ -679,7 +679,7 @@ index ad606cf89..1b5a0277b 100644
    const appImagePath = linuxBuildsAppImage(config.to) ? await findBuiltAppImage(paths) : null;
    const debPath = config.to === "deb" ? await findBuiltArtifact(paths, ".deb") : null;
 diff --git a/tools/pack/src/resources/index.ts b/tools/pack/src/resources/index.ts
-index c22cecd51..50a42c939 100644
+index c22cecd510..50a42c9396 100644
 --- a/tools/pack/src/resources/index.ts
 +++ b/tools/pack/src/resources/index.ts
 @@ -61,6 +61,11 @@ export const linuxResources = {
@@ -695,7 +695,7 @@ index c22cecd51..50a42c939 100644
  
  const BUNDLED_RESOURCE_TREES = [
 diff --git a/tools/pack/tests/config/config.test.ts b/tools/pack/tests/config/config.test.ts
-index b3ddc2825..9234d3332 100644
+index b3ddc28258..9234d33327 100644
 --- a/tools/pack/tests/config/config.test.ts
 +++ b/tools/pack/tests/config/config.test.ts
 @@ -95,6 +95,36 @@ describe("resolveToolPackConfig linux build target", () => {
@@ -736,7 +736,7 @@ index b3ddc2825..9234d3332 100644
    it("keeps the default cache outside custom tools-pack roots", () => {
      const config = resolveToolPackConfig("win", {
 diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
-index 1a51f5a3f..c6f360c94 100644
+index 1a51f5a3f5..c6f360c940 100644
 --- a/tools/pack/tests/linux.test.ts
 +++ b/tools/pack/tests/linux.test.ts
 @@ -76,7 +76,9 @@ import {
@@ -894,7 +894,7 @@ index 1a51f5a3f..c6f360c94 100644
 +});
 diff --git a/tools/pack/tests/linux/web-standalone-after-pack.test.ts b/tools/pack/tests/linux/web-standalone-after-pack.test.ts
 new file mode 100644
-index 000000000..459ab452d
+index 0000000000..459ab452da
 --- /dev/null
 +++ b/tools/pack/tests/linux/web-standalone-after-pack.test.ts
 @@ -0,0 +1,296 @@
@@ -1195,5 +1195,5 @@ index 000000000..459ab452d
 +  });
 +});
 -- 
-2.55.0
+2.56.0
 

@@ -1,4 +1,4 @@
-From 78a1986b781a21235ab2e24adb13882972d5af94 Mon Sep 17 00:00:00 2001
+From 1d866d405f2f2e0b3926e2ed6e9c7aa1b4670f1e Mon Sep 17 00:00:00 2001
 From: Kacper Paczos <kacperpaczos2024@proton.me>
 Date: Mon, 5 Oct 2026 20:53:34 +0200
 Subject: [PATCH 02/14] pack(linux): standards-compliant .deb target (from
@@ -22,7 +22,7 @@ Note: container-build hunks from the PR were rejected; host builds only (see tas
  create mode 100644 tools/pack/resources/linux/debian/lintian-overrides
 
 diff --git a/tools/pack/AGENTS.md b/tools/pack/AGENTS.md
-index d83057123..585fd1930 100644
+index 6710052bed..4ce28e049f 100644
 --- a/tools/pack/AGENTS.md
 +++ b/tools/pack/AGENTS.md
 @@ -12,6 +12,7 @@ Read `tools/pack/CACHE.md` before changing any build-cache node key, adding a ca
@@ -34,7 +34,7 @@ index d83057123..585fd1930 100644
  - Linux containerized builds via `electronuserland/builder` Docker image for distro-agnostic glibc compat.
  - Consuming sidecar/process/path primitives from `@open-design/sidecar-proto`, `@open-design/sidecar`, and `@open-design/platform`.
 diff --git a/tools/pack/README.md b/tools/pack/README.md
-index 8a679fac8..21829bea4 100644
+index 8a679fac8c..21829bea49 100644
 --- a/tools/pack/README.md
 +++ b/tools/pack/README.md
 @@ -96,6 +96,7 @@ Local lifecycle commands:
@@ -70,7 +70,7 @@ index 8a679fac8..21829bea4 100644
  `.blockmap` files is treated as scratch and cleaned from the builder directory; release-beta generates the authoritative
 diff --git a/tools/pack/resources/linux/debian/changelog.template b/tools/pack/resources/linux/debian/changelog.template
 new file mode 100644
-index 000000000..016c74cc4
+index 0000000000..016c74cc41
 --- /dev/null
 +++ b/tools/pack/resources/linux/debian/changelog.template
 @@ -0,0 +1,5 @@
@@ -81,7 +81,7 @@ index 000000000..016c74cc4
 + -- Open Design Contributors <contributors@open-design.ai>  @@DATE@@
 diff --git a/tools/pack/resources/linux/debian/copyright b/tools/pack/resources/linux/debian/copyright
 new file mode 100644
-index 000000000..273fe39e9
+index 0000000000..273fe39e98
 --- /dev/null
 +++ b/tools/pack/resources/linux/debian/copyright
 @@ -0,0 +1,17 @@
@@ -104,7 +104,7 @@ index 000000000..273fe39e9
 + found in the file /usr/share/common-licenses/Apache-2.0.
 diff --git a/tools/pack/resources/linux/debian/lintian-overrides b/tools/pack/resources/linux/debian/lintian-overrides
 new file mode 100644
-index 000000000..ae8b066e2
+index 0000000000..ae8b066e28
 --- /dev/null
 +++ b/tools/pack/resources/linux/debian/lintian-overrides
 @@ -0,0 +1,54 @@
@@ -163,7 +163,7 @@ index 000000000..ae8b066e2
 +open-design: package-contains-vcs-control-file
 +open-design: missing-depends-on-sensible-utils
 diff --git a/tools/pack/src/config/index.ts b/tools/pack/src/config/index.ts
-index 651702344..51cbe0a93 100644
+index 6517023446..51cbe0a934 100644
 --- a/tools/pack/src/config/index.ts
 +++ b/tools/pack/src/config/index.ts
 @@ -36,7 +36,7 @@ function resolveToolPackRoot(startDir: string): string {
@@ -185,7 +185,7 @@ index 651702344..51cbe0a93 100644
  }
  
 diff --git a/tools/pack/src/index.ts b/tools/pack/src/index.ts
-index d79c7f75a..253894c27 100644
+index d79c7f75ae..253894c277 100644
 --- a/tools/pack/src/index.ts
 +++ b/tools/pack/src/index.ts
 @@ -80,7 +80,7 @@ function addSharedOptions(command: CacCommand) {
@@ -198,7 +198,7 @@ index d79c7f75a..253894c27 100644
    win: "build target: all|dir|nsis|zip (default: nsis). `zip` produces a portable zip from the unpacked build; `all` produces dir+nsis+zip.",
  };
 diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
-index f447274d1..cc7523810 100644
+index f447274d1c..cc75238107 100644
 --- a/tools/pack/src/linux.ts
 +++ b/tools/pack/src/linux.ts
 @@ -144,7 +144,7 @@ export function buildDockerArgs(
@@ -561,7 +561,7 @@ index f447274d1..cc7523810 100644
      resourceRoot: paths.resourceRoot,
      runtimeNamespaceRoot: config.roots.runtime.namespaceRoot,
 diff --git a/tools/pack/src/resources/index.ts b/tools/pack/src/resources/index.ts
-index dcab8ab88..c22cecd51 100644
+index dcab8ab883..c22cecd510 100644
 --- a/tools/pack/src/resources/index.ts
 +++ b/tools/pack/src/resources/index.ts
 @@ -55,6 +55,12 @@ export const winResources = {
@@ -578,7 +578,7 @@ index dcab8ab88..c22cecd51 100644
  
  const BUNDLED_RESOURCE_TREES = [
 diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
-index 5cb59545c..7a66ccc9b 100644
+index 5cb59545c4..7a66ccc9b3 100644
 --- a/tools/pack/tests/linux.test.ts
 +++ b/tools/pack/tests/linux.test.ts
 @@ -60,8 +60,11 @@ import {
@@ -691,5 +691,5 @@ index 5cb59545c..7a66ccc9b 100644
    it("allows status-only headless inspect", () => {
      expect(shouldRejectLinuxHeadlessInspectOptions({})).toBe(false);
 -- 
-2.55.0
+2.56.0
 

@@ -1,4 +1,4 @@
-From a7b91ef80c344b12d41d382db5ad7b18df4e1eda Mon Sep 17 00:00:00 2001
+From 8f407b526db4520fe2b8bf10e38da156d7f338b3 Mon Sep 17 00:00:00 2001
 From: Kacper Paczos <kacperpaczos2024@proton.me>
 Date: Mon, 5 Oct 2026 20:27:44 +0200
 Subject: [PATCH 01/14] pack(linux): native module install policy and
@@ -13,7 +13,7 @@ Subject: [PATCH 01/14] pack(linux): native module install policy and
  create mode 100644 tools/pack/tests/linux/native-modules.test.ts
 
 diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
-index e9342ce62..f447274d1 100644
+index e9342ce620..f447274d1c 100644
 --- a/tools/pack/src/linux.ts
 +++ b/tools/pack/src/linux.ts
 @@ -33,6 +33,11 @@ import {
@@ -57,7 +57,7 @@ index e9342ce62..f447274d1 100644
      outputRoot: paths.appBuilderOutputRoot,
 diff --git a/tools/pack/src/linux/native-modules.ts b/tools/pack/src/linux/native-modules.ts
 new file mode 100644
-index 000000000..b9538c9b3
+index 0000000000..b9538c9b3e
 --- /dev/null
 +++ b/tools/pack/src/linux/native-modules.ts
 @@ -0,0 +1,72 @@
@@ -135,7 +135,7 @@ index 000000000..b9538c9b3
 +}
 diff --git a/tools/pack/tests/linux/native-modules.test.ts b/tools/pack/tests/linux/native-modules.test.ts
 new file mode 100644
-index 000000000..6f122cfc6
+index 0000000000..6f122cfc68
 --- /dev/null
 +++ b/tools/pack/tests/linux/native-modules.test.ts
 @@ -0,0 +1,147 @@
@@ -287,5 +287,5 @@ index 000000000..6f122cfc6
 +  });
 +});
 -- 
-2.55.0
+2.56.0
 

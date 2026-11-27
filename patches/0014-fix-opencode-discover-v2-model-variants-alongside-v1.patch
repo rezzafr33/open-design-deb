@@ -1,4 +1,4 @@
-From 2ec9d13ff1f8cbb0d01e5d80c4b7b0d7d0e07ad8 Mon Sep 17 00:00:00 2001
+From 57a47ca11ad8685164dee60e1e63da688b410441 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=E6=88=91=E5=B0=B1=E7=88=B1=E6=91=87=E6=91=86?=
  <1635874257@qq.com>
 Date: Mon, 2 Nov 2026 16:18:21 +0800
@@ -13,7 +13,7 @@ Subject: [PATCH 14/14] fix(opencode): discover v2 model variants alongside v1
  create mode 100644 apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
 
 diff --git a/apps/daemon/src/runtimes/defs/opencode.ts b/apps/daemon/src/runtimes/defs/opencode.ts
-index 920dfbb20..5fd604e3e 100644
+index 920dfbb208..5fd604e3e3 100644
 --- a/apps/daemon/src/runtimes/defs/opencode.ts
 +++ b/apps/daemon/src/runtimes/defs/opencode.ts
 @@ -1,4 +1,3 @@
@@ -201,7 +201,7 @@ index 920dfbb20..5fd604e3e 100644
      // not guess their variants. Unknown model/variant pairs omit the variant
      // rather than inventing a provider capability or preventing the base
 diff --git a/apps/daemon/tests/runtimes/agent-args.test.ts b/apps/daemon/tests/runtimes/agent-args.test.ts
-index 6c7256f60..8adb0e270 100644
+index 6c7256f606..8adb0e2708 100644
 --- a/apps/daemon/tests/runtimes/agent-args.test.ts
 +++ b/apps/daemon/tests/runtimes/agent-args.test.ts
 @@ -83,9 +83,6 @@ test('opencode args pass model-supported variants without changing the default a
@@ -216,7 +216,7 @@ index 6c7256f60..8adb0e270 100644
      (model) => model.id === 'openai/gpt-5.6-sol',
 diff --git a/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts b/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
 new file mode 100644
-index 000000000..95309a777
+index 0000000000..95309a7778
 --- /dev/null
 +++ b/apps/daemon/tests/runtimes/opencode-model-discovery.test.ts
 @@ -0,0 +1,185 @@
@@ -406,7 +406,7 @@ index 000000000..95309a777
 +  });
 +});
 diff --git a/docs/agent-adapters.md b/docs/agent-adapters.md
-index b56a258db..10835e956 100644
+index b56a258db4..10835e9561 100644
 --- a/docs/agent-adapters.md
 +++ b/docs/agent-adapters.md
 @@ -301,12 +301,15 @@ authentication, and the boundary between REST and MCP.
@@ -432,5 +432,5 @@ index b56a258db..10835e956 100644
    1.x and `opencode session export <id> --sanitize --standalone` on 2.x.
  - The optional tool-preview plugin (`runtimes/opencode-event-plugin.ts`) is
 -- 
-2.55.0
+2.56.0
 

@@ -1,4 +1,4 @@
-From 77aac666a32aa7c9b9901bc838b52be6886eee60 Mon Sep 17 00:00:00 2001
+From 4895b7e0c4e7b96b9eb2af9003696c9d90e7dc85 Mon Sep 17 00:00:00 2001
 From: kacperpaczos <kacperpaczos@users.noreply.github.com>
 Date: Tue, 6 Oct 2026 21:06:32 +0200
 Subject: [PATCH 12/14] fix(linux): after-install template relocates icon to
@@ -16,7 +16,7 @@ Subject: [PATCH 12/14] fix(linux): after-install template relocates icon to
 
 diff --git a/tools/pack/resources/linux/after-install.tpl b/tools/pack/resources/linux/after-install.tpl
 new file mode 100755
-index 000000000..32feeb29b
+index 0000000000..32feeb29b5
 --- /dev/null
 +++ b/tools/pack/resources/linux/after-install.tpl
 @@ -0,0 +1,82 @@
@@ -104,7 +104,7 @@ index 000000000..32feeb29b
 +fi
 diff --git a/tools/pack/resources/linux/desktop-icon-fixup.sh b/tools/pack/resources/linux/desktop-icon-fixup.sh
 deleted file mode 100755
-index 76bdc3b37..000000000
+index 76bdc3b376..0000000000
 --- a/tools/pack/resources/linux/desktop-icon-fixup.sh
 +++ /dev/null
 @@ -1,27 +0,0 @@
@@ -136,7 +136,7 @@ index 76bdc3b37..000000000
 -gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 -exit 0
 diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
-index 551c3130d..2be56733c 100644
+index 551c3130da..2be56733cd 100644
 --- a/tools/pack/src/linux.ts
 +++ b/tools/pack/src/linux.ts
 @@ -941,13 +941,14 @@ export async function writeLinuxBuilderConfig(config: ToolPackConfig, paths: Lin
@@ -181,7 +181,7 @@ index 551c3130d..2be56733c 100644
          }
        : {}),
 diff --git a/tools/pack/src/resources/index.ts b/tools/pack/src/resources/index.ts
-index a70966c96..d06dbffc3 100644
+index a70966c962..d06dbffc30 100644
 --- a/tools/pack/src/resources/index.ts
 +++ b/tools/pack/src/resources/index.ts
 @@ -61,11 +61,12 @@ export const linuxResources = {
@@ -203,7 +203,7 @@ index a70966c96..d06dbffc3 100644
    // Lives under linux/ (not the shared resources root) because the Linux lane
    // materializes a self-contained standalone tree without the mac/win pruning,
 diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
-index 359eaea06..e8cf2d87c 100644
+index 359eaea06d..e8cf2d87ca 100644
 --- a/tools/pack/tests/linux.test.ts
 +++ b/tools/pack/tests/linux.test.ts
 @@ -918,21 +918,23 @@ describe("writeLinuxBuilderConfig", () => {
@@ -243,5 +243,5 @@ index 359eaea06..e8cf2d87c 100644
        // --to all never produces an rpm; resolveLinuxBuilderTargets owns that).
        expect(builderConfig.deb).toBeUndefined();
 -- 
-2.55.0
+2.56.0
 

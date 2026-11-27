@@ -1,4 +1,4 @@
-From 36b1cceb9de672d87e8499dc3273a7a00b709129 Mon Sep 17 00:00:00 2001
+From d9a72021a97927884d4861b2dd3beea0c25d7306 Mon Sep 17 00:00:00 2001
 From: Travis James <travis@tribehealthsolutions.com>
 Date: Wed, 14 Oct 2026 14:45:40 -0500
 Subject: [PATCH 13/14] fix(runtimes): support OpenCode 2.x CLI alongside 1.x
@@ -49,7 +49,7 @@ builds the matching argv:
  create mode 100644 apps/daemon/tests/runtimes/runtime-capability-scope.test.ts
 
 diff --git a/apps/daemon/src/connectionTest.ts b/apps/daemon/src/connectionTest.ts
-index dae90aaea..e367b7938 100644
+index dae90aaea9..e367b79380 100644
 --- a/apps/daemon/src/connectionTest.ts
 +++ b/apps/daemon/src/connectionTest.ts
 @@ -99,6 +99,11 @@ import {
@@ -135,7 +135,7 @@ index dae90aaea..e367b7938 100644
        def,
        model,
 diff --git a/apps/daemon/src/memory-llm.ts b/apps/daemon/src/memory-llm.ts
-index 27da7f6a1..96cc30b5d 100644
+index 27da7f6a1a..96cc30b5dd 100644
 --- a/apps/daemon/src/memory-llm.ts
 +++ b/apps/daemon/src/memory-llm.ts
 @@ -76,7 +76,9 @@ import {
@@ -187,7 +187,7 @@ index 27da7f6a1..96cc30b5d 100644
    const invocation = createCommandInvocation({
      command: launch.launchPath,
 diff --git a/apps/daemon/src/runtimes/defs/byok-opencode.ts b/apps/daemon/src/runtimes/defs/byok-opencode.ts
-index 95a510459..6fde8b954 100644
+index 95a510459d..6fde8b9543 100644
 --- a/apps/daemon/src/runtimes/defs/byok-opencode.ts
 +++ b/apps/daemon/src/runtimes/defs/byok-opencode.ts
 @@ -2,6 +2,8 @@ import { opencodeByokModelId } from '../byok-opencode.js';
@@ -221,7 +221,7 @@ index 95a510459..6fde8b954 100644
      if (model) args.push('-m', model);
      return args;
 diff --git a/apps/daemon/src/runtimes/defs/opencode.ts b/apps/daemon/src/runtimes/defs/opencode.ts
-index 7e6fe646b..920dfbb20 100644
+index 7e6fe646b8..920dfbb208 100644
 --- a/apps/daemon/src/runtimes/defs/opencode.ts
 +++ b/apps/daemon/src/runtimes/defs/opencode.ts
 @@ -2,10 +2,70 @@ import { DEFAULT_MODEL_OPTION } from './shared.js';
@@ -363,7 +363,7 @@ index 7e6fe646b..920dfbb20 100644
        return args;
      },
 diff --git a/apps/daemon/src/runtimes/detection.ts b/apps/daemon/src/runtimes/detection.ts
-index da9b78c28..436ac3ce5 100644
+index da9b78c285..436ac3ce51 100644
 --- a/apps/daemon/src/runtimes/detection.ts
 +++ b/apps/daemon/src/runtimes/detection.ts
 @@ -1,4 +1,5 @@
@@ -446,7 +446,7 @@ index da9b78c28..436ac3ce5 100644
    def: RuntimeAgentDef,
    context: RuntimeVersionProbeContext,
 diff --git a/apps/daemon/src/runtimes/opencode-child-evidence.ts b/apps/daemon/src/runtimes/opencode-child-evidence.ts
-index 1d02d3706..879b76df5 100644
+index 1d02d3706d..879b76df58 100644
 --- a/apps/daemon/src/runtimes/opencode-child-evidence.ts
 +++ b/apps/daemon/src/runtimes/opencode-child-evidence.ts
 @@ -12,6 +12,7 @@ import {
@@ -518,7 +518,7 @@ index 1d02d3706..879b76df5 100644
          env: input.env,
          timeout: input.timeoutMs ?? OPENCODE_CHILD_EXPORT_TIMEOUT_MS,
 diff --git a/apps/daemon/src/runtimes/opencode-permissions.ts b/apps/daemon/src/runtimes/opencode-permissions.ts
-index 50a71ad03..8638b9cba 100644
+index 50a71ad035..8638b9cba4 100644
 --- a/apps/daemon/src/runtimes/opencode-permissions.ts
 +++ b/apps/daemon/src/runtimes/opencode-permissions.ts
 @@ -2,21 +2,73 @@ import { lstat, realpath } from 'node:fs/promises';
@@ -714,7 +714,7 @@ index 50a71ad03..8638b9cba 100644
 +  return { ...env, PWD: cwd };
 +}
 diff --git a/apps/daemon/src/server.ts b/apps/daemon/src/server.ts
-index db74d1677..4a12c27f1 100644
+index 4161e93a09..9f8c8a4ee9 100644
 --- a/apps/daemon/src/server.ts
 +++ b/apps/daemon/src/server.ts
 @@ -516,7 +516,12 @@ import {
@@ -731,7 +731,7 @@ index db74d1677..4a12c27f1 100644
  import { createAgentStderrVisibilityFilter } from './amr-stderr-filter.js';
  import { createQoderStreamHandler } from './runtimes/qoder-stream.js';
  import { subscribe as subscribeFileEvents } from './project-watchers.js';
-@@ -14556,11 +14561,17 @@ export async function startServer({
+@@ -14554,11 +14559,17 @@ export async function startServer({
      let args;
      const observeClaudeNativeChildBehavior =
        def.id === 'claude' && strategyTaskAtStart !== null;
@@ -749,7 +749,7 @@ index db74d1677..4a12c27f1 100644
        args = def.buildArgs(
          composed,
          promptImagePaths,
-@@ -15231,7 +15242,10 @@ export async function startServer({
+@@ -15229,7 +15240,10 @@ export async function startServer({
          def.streamFormat === CODEX_APP_SERVER_STREAM_FORMAT
            ? 'pipe'
            : 'ignore';
@@ -761,7 +761,7 @@ index db74d1677..4a12c27f1 100644
          ...agentSpawnEnv,
          ...(mmdRouteLaunchEnv || {}),
          ...odMediaEnv,
-@@ -15297,7 +15311,7 @@ export async function startServer({
+@@ -15295,7 +15309,7 @@ export async function startServer({
          ...(odNextTaskInputSnapshot
            ? { OD_TASK_INPUT_DIR: odNextTaskInputSnapshot.projectionDir }
            : {}),
@@ -770,7 +770,7 @@ index db74d1677..4a12c27f1 100644
        // Build permissions after configured env expansion and launch overrides,
        // so the granted temp root matches the environment the child receives.
        if (isOpenCodeContent || isMiMoContent) {
-@@ -17084,6 +17098,7 @@ export async function startServer({
+@@ -17082,6 +17096,7 @@ export async function startServer({
                loadSanitizedExport: createOpenCodeSanitizedExportLoader({
                  launchPath,
                  env: spawnedAgentEnv,
@@ -779,7 +779,7 @@ index db74d1677..4a12c27f1 100644
              });
              for (const fact of facts) {
 diff --git a/apps/daemon/tests/connection-test.test.ts b/apps/daemon/tests/connection-test.test.ts
-index 13e4018cb..ba7ce5e4f 100644
+index 13e4018cbc..ba7ce5e4f6 100644
 --- a/apps/daemon/tests/connection-test.test.ts
 +++ b/apps/daemon/tests/connection-test.test.ts
 @@ -3834,9 +3834,43 @@ setTimeout(() => process.exit(0), 50);
@@ -926,7 +926,7 @@ index 13e4018cb..ba7ce5e4f 100644
      const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-opencode-variant-scope-'));
      const bin = path.join(markerDir, 'opencode-other');
 diff --git a/apps/daemon/tests/runtimes/agent-args.test.ts b/apps/daemon/tests/runtimes/agent-args.test.ts
-index d05b74f80..6c7256f60 100644
+index d05b74f803..6c7256f606 100644
 --- a/apps/daemon/tests/runtimes/agent-args.test.ts
 +++ b/apps/daemon/tests/runtimes/agent-args.test.ts
 @@ -83,7 +83,10 @@ test('opencode args pass model-supported variants without changing the default a
@@ -1021,7 +1021,7 @@ index d05b74f80..6c7256f60 100644
  // (upstream copilot-cli issue #1046, confirmed working as
  // `echo "..." | copilot --model <id>`). The earlier `-p -` attempt
 diff --git a/apps/daemon/tests/runtimes/byok-opencode.test.ts b/apps/daemon/tests/runtimes/byok-opencode.test.ts
-index a194606bb..19cf636d6 100644
+index a194606bbe..19cf636d62 100644
 --- a/apps/daemon/tests/runtimes/byok-opencode.test.ts
 +++ b/apps/daemon/tests/runtimes/byok-opencode.test.ts
 @@ -15,6 +15,11 @@ describe('byok-opencode runtime config', () => {
@@ -1068,7 +1068,7 @@ index a194606bb..19cf636d6 100644
      'allows images from attachments and Read tools for unknown %s models',
      (protocol) => {
 diff --git a/apps/daemon/tests/runtimes/opencode-child-evidence.test.ts b/apps/daemon/tests/runtimes/opencode-child-evidence.test.ts
-index 831db6f56..6d8d6c059 100644
+index 831db6f56c..6d8d6c0599 100644
 --- a/apps/daemon/tests/runtimes/opencode-child-evidence.test.ts
 +++ b/apps/daemon/tests/runtimes/opencode-child-evidence.test.ts
 @@ -807,6 +807,7 @@ describe('native OpenCode child evidence', () => {
@@ -1125,7 +1125,7 @@ index 831db6f56..6d8d6c059 100644
    });
 diff --git a/apps/daemon/tests/runtimes/opencode-models.test.ts b/apps/daemon/tests/runtimes/opencode-models.test.ts
 new file mode 100644
-index 000000000..1338bf40c
+index 0000000000..1338bf40c2
 --- /dev/null
 +++ b/apps/daemon/tests/runtimes/opencode-models.test.ts
 @@ -0,0 +1,74 @@
@@ -1205,7 +1205,7 @@ index 000000000..1338bf40c
 +});
 diff --git a/apps/daemon/tests/runtimes/opencode-permissions.test.ts b/apps/daemon/tests/runtimes/opencode-permissions.test.ts
 new file mode 100644
-index 000000000..6222d227c
+index 0000000000..6222d227c5
 --- /dev/null
 +++ b/apps/daemon/tests/runtimes/opencode-permissions.test.ts
 @@ -0,0 +1,129 @@
@@ -1340,7 +1340,7 @@ index 000000000..6222d227c
 +});
 diff --git a/apps/daemon/tests/runtimes/runtime-capability-scope.test.ts b/apps/daemon/tests/runtimes/runtime-capability-scope.test.ts
 new file mode 100644
-index 000000000..cd7c5f8f6
+index 0000000000..cd7c5f8f6b
 --- /dev/null
 +++ b/apps/daemon/tests/runtimes/runtime-capability-scope.test.ts
 @@ -0,0 +1,102 @@
@@ -1447,7 +1447,7 @@ index 000000000..cd7c5f8f6
 +  });
 +});
 diff --git a/docs/agent-adapters.md b/docs/agent-adapters.md
-index 83f59e346..b56a258db 100644
+index 83f59e3465..b56a258db4 100644
 --- a/docs/agent-adapters.md
 +++ b/docs/agent-adapters.md
 @@ -216,8 +216,8 @@ authentication, and the boundary between REST and MCP.
@@ -1511,5 +1511,5 @@ index 83f59e346..b56a258db 100644
    and Linux hosts. Windows, WSL, or an explicit
    `OD_CODEX_SANDBOX=danger-full-access` operator override uses
 -- 
-2.55.0
+2.56.0
 

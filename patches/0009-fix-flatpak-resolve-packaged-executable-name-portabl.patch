@@ -1,4 +1,4 @@
-From 700dd7615ae7dd4d80782a4025b87bad134e60a4 Mon Sep 17 00:00:00 2001
+From 94b97d54c1f013e1c6f9cf066fda05fa90a41866 Mon Sep 17 00:00:00 2001
 From: Kacper Paczos <kacperpaczos2024@proton.me>
 Date: Tue, 6 Oct 2026 12:46:27 +0200
 Subject: [PATCH 09/14] fix(flatpak): resolve packaged executable name
@@ -9,7 +9,7 @@ Subject: [PATCH 09/14] fix(flatpak): resolve packaged executable name
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/packaging/flatpak/io.open-design.desktop.json b/packaging/flatpak/io.open-design.desktop.json
-index cfcc4a486..380c2dbf6 100644
+index cfcc4a4868..380c2dbf6b 100644
 --- a/packaging/flatpak/io.open-design.desktop.json
 +++ b/packaging/flatpak/io.open-design.desktop.json
 @@ -24,8 +24,8 @@
@@ -24,5 +24,5 @@ index cfcc4a486..380c2dbf6 100644
                  "gdk-pixbuf-thumbnailer -s 512 icon.png icon-512.png",
                  "install -Dm644 icon-512.png /app/share/icons/hicolor/512x512/apps/io.opendesign.desktop.png"
 -- 
-2.55.0
+2.56.0
 

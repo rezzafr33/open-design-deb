@@ -1,4 +1,4 @@
-From 9e96ba43036f3b5df635b865e3f3fc73f8f403b4 Mon Sep 17 00:00:00 2001
+From 068baf7546f7fd97fdbda31e530dbda2614ace5f Mon Sep 17 00:00:00 2001
 From: Kacper Paczos <kacperpaczos2024@proton.me>
 Date: Mon, 5 Oct 2026 21:26:32 +0200
 Subject: [PATCH 04/14] pack(linux): add --to rpm build target
@@ -14,7 +14,7 @@ Subject: [PATCH 04/14] pack(linux): add --to rpm build target
  7 files changed, 161 insertions(+), 17 deletions(-)
 
 diff --git a/tools/pack/AGENTS.md b/tools/pack/AGENTS.md
-index 585fd1930..4ad5be161 100644
+index 4ce28e049f..20263539ee 100644
 --- a/tools/pack/AGENTS.md
 +++ b/tools/pack/AGENTS.md
 @@ -13,6 +13,7 @@ Read `tools/pack/CACHE.md` before changing any build-cache node key, adding a ca
@@ -26,7 +26,7 @@ index 585fd1930..4ad5be161 100644
  - Linux containerized builds via `electronuserland/builder` Docker image for distro-agnostic glibc compat.
  - Consuming sidecar/process/path primitives from `@open-design/sidecar-proto`, `@open-design/sidecar`, and `@open-design/platform`.
 diff --git a/tools/pack/README.md b/tools/pack/README.md
-index 21829bea4..8e209187f 100644
+index 21829bea49..8e209187f1 100644
 --- a/tools/pack/README.md
 +++ b/tools/pack/README.md
 @@ -97,6 +97,7 @@ Local lifecycle commands:
@@ -56,7 +56,7 @@ index 21829bea4..8e209187f 100644
  - Full Linux AppImage PR smoke remains release-lane only; PR validation runs the Linux headless packaged smoke because it does not require a display server.
  
 diff --git a/tools/pack/src/config/index.ts b/tools/pack/src/config/index.ts
-index 51cbe0a93..934e7c9db 100644
+index 51cbe0a934..934e7c9dba 100644
 --- a/tools/pack/src/config/index.ts
 +++ b/tools/pack/src/config/index.ts
 @@ -36,7 +36,7 @@ function resolveToolPackRoot(startDir: string): string {
@@ -78,7 +78,7 @@ index 51cbe0a93..934e7c9db 100644
  }
  
 diff --git a/tools/pack/src/index.ts b/tools/pack/src/index.ts
-index 253894c27..aec9228c3 100644
+index 253894c277..aec9228c36 100644
 --- a/tools/pack/src/index.ts
 +++ b/tools/pack/src/index.ts
 @@ -80,7 +80,7 @@ function addSharedOptions(command: CacCommand) {
@@ -91,7 +91,7 @@ index 253894c27..aec9228c3 100644
    win: "build target: all|dir|nsis|zip (default: nsis). `zip` produces a portable zip from the unpacked build; `all` produces dir+nsis+zip.",
  };
 diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
-index 121f52a32..f6586a69f 100644
+index 121f52a320..f6586a69fd 100644
 --- a/tools/pack/src/linux.ts
 +++ b/tools/pack/src/linux.ts
 @@ -144,7 +144,7 @@ export function buildDockerArgs(
@@ -254,7 +254,7 @@ index 121f52a32..f6586a69f 100644
      resourceRoot: paths.resourceRoot,
      runtimeNamespaceRoot: config.roots.runtime.namespaceRoot,
 diff --git a/tools/pack/tests/config/config.test.ts b/tools/pack/tests/config/config.test.ts
-index 0b55b2135..b3ddc2825 100644
+index 0b55b2135e..b3ddc28258 100644
 --- a/tools/pack/tests/config/config.test.ts
 +++ b/tools/pack/tests/config/config.test.ts
 @@ -85,6 +85,16 @@ describe("resolveToolPackConfig win build target", () => {
@@ -275,7 +275,7 @@ index 0b55b2135..b3ddc2825 100644
    it("keeps the default cache outside custom tools-pack roots", () => {
      const config = resolveToolPackConfig("win", {
 diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
-index 7a66ccc9b..d6c79d910 100644
+index 7a66ccc9b3..d6c79d9106 100644
 --- a/tools/pack/tests/linux.test.ts
 +++ b/tools/pack/tests/linux.test.ts
 @@ -58,6 +58,7 @@ import {
@@ -415,5 +415,5 @@ index 7a66ccc9b..d6c79d910 100644
    it("allows status-only headless inspect", () => {
      expect(shouldRejectLinuxHeadlessInspectOptions({})).toBe(false);
 -- 
-2.55.0
+2.56.0
 

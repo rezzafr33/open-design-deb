@@ -1,4 +1,4 @@
-From 5d7d3202d1f7c7d2d1e5985ee969d8320a9464c9 Mon Sep 17 00:00:00 2001
+From 049cd6e72b22ae29c2717ac403525bc2d3db2f37 Mon Sep 17 00:00:00 2001
 From: Kacper Paczos <kacperpaczos2024@proton.me>
 Date: Tue, 6 Oct 2026 02:12:07 +0200
 Subject: [PATCH 08/14] fix(linux): portable release builds, rpm artifact name
@@ -19,7 +19,7 @@ Subject: [PATCH 08/14] fix(linux): portable release builds, rpm artifact name
  3 files changed, 20 insertions(+), 7 deletions(-)
 
 diff --git a/packaging/flatpak/io.open-design.desktop.json b/packaging/flatpak/io.open-design.desktop.json
-index 619584c3f..cfcc4a486 100644
+index 619584c3f6..cfcc4a4868 100644
 --- a/packaging/flatpak/io.open-design.desktop.json
 +++ b/packaging/flatpak/io.open-design.desktop.json
 @@ -25,10 +25,9 @@
@@ -36,7 +36,7 @@ index 619584c3f..cfcc4a486 100644
              ],
              "sources": [
 diff --git a/tools/pack/src/linux.ts b/tools/pack/src/linux.ts
-index 1b5a0277b..840ea04d2 100644
+index 1b5a0277b5..840ea04d24 100644
 --- a/tools/pack/src/linux.ts
 +++ b/tools/pack/src/linux.ts
 @@ -703,8 +703,9 @@ export function resolveLinuxBuilderTargets(to: ToolPackConfig["to"]): string[] {
@@ -78,7 +78,7 @@ index 1b5a0277b..840ea04d2 100644
            },
          }
 diff --git a/tools/pack/tests/linux.test.ts b/tools/pack/tests/linux.test.ts
-index c6f360c94..bd3d36d69 100644
+index c6f360c940..bd3d36d693 100644
 --- a/tools/pack/tests/linux.test.ts
 +++ b/tools/pack/tests/linux.test.ts
 @@ -907,12 +907,17 @@ describe("writeLinuxBuilderConfig", () => {
@@ -101,5 +101,5 @@ index c6f360c94..bd3d36d69 100644
        });
        // Explicit targets only: --to rpm must not leak the deb block (and
 -- 
-2.55.0
+2.56.0
 
