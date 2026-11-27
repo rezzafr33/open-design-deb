@@ -93,6 +93,11 @@ jobs:
         working-directory: src
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+          # onnxruntime-node's install hook downloads optional CUDA binaries from
+          # a GitHub release asset that now returns 404, which aborts the
+          # tools-pack production install. The .deb drops the CUDA/TensorRT
+          # providers anyway (patch 0002), so skip the download.
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
         run: |
           set -euo pipefail
           # --portable: release artifacts must not bake the build machine's
